@@ -2,7 +2,7 @@
 
 ## Overview
 
-Ralph is an autonomous AI agent loop that runs Amp repeatedly until all PRD items are complete. Each iteration is a fresh Amp instance with clean context.
+Ralph is an autonomous AI agent loop that runs Claude Code repeatedly until all PRD items are complete. Each iteration is a fresh Claude instance with clean context.
 
 ## Commands
 
@@ -19,9 +19,11 @@ cd flowchart && npm run build
 
 ## Key Files
 
-- `ralph.sh` - The bash loop that spawns fresh Amp instances
-- `prompt.md` - Instructions given to each Amp instance
+- `ralph.sh` - The bash loop that spawns fresh Claude instances
+- `prompt.md` - Instructions given to each Claude instance
 - `prd.json.example` - Example PRD format
+- `transcripts/` - Full logs from each iteration
+- `transcripts/index.json` - Searchable index of transcripts
 - `flowchart/` - Interactive React Flow diagram explaining how Ralph works
 
 ## Flowchart
@@ -37,7 +39,8 @@ npm run dev
 
 ## Patterns
 
-- Each iteration spawns a fresh Amp instance with clean context
-- Memory persists via git history, `progress.txt`, and `prd.json`
+- Each iteration spawns a fresh Claude instance with clean context
+- Memory persists via git history, `progress.txt`, `prd.json`, and `transcripts/`
 - Stories should be small enough to complete in one context window
 - Always update AGENTS.md with discovered patterns for future iterations
+- Use `read-transcript` skill to access detailed context from previous iterations
