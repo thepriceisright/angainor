@@ -2,7 +2,7 @@
 
 ![Ralph](ralph.webp)
 
-Ralph is an autonomous AI agent loop that runs [Amp](https://ampcode.com) repeatedly until all PRD items are complete. Each iteration is a fresh Amp instance with clean context. Memory persists via git history, `progress.txt`, and `prd.json`.
+Ralph is an autonomous AI agent loop that runs [Claude Code](https://claude.ai/code) repeatedly until all PRD items are complete. Each iteration is a fresh Claude instance with clean context. Memory persists via git history, `progress.txt`, `prd.json`, and transcript logs.
 
 Based on [Geoffrey Huntley's Ralph pattern](https://ghuntley.com/ralph/).
 
@@ -10,7 +10,7 @@ Based on [Geoffrey Huntley's Ralph pattern](https://ghuntley.com/ralph/).
 
 ## Prerequisites
 
-- [Amp CLI](https://ampcode.com) installed and authenticated
+- [Claude Code CLI](https://claude.ai/code) installed and authenticated
 - `jq` installed (`brew install jq` on macOS)
 - A git repository for your project
 
@@ -30,24 +30,13 @@ chmod +x scripts/ralph/ralph.sh
 
 ### Option 2: Install skills globally
 
-Copy the skills to your Amp config for use across all projects:
+Copy the skills to your Claude Code config for use across all projects:
 
 ```bash
-cp -r skills/prd ~/.config/amp/skills/
-cp -r skills/ralph ~/.config/amp/skills/
+cp -r skills/prd ~/.claude/skills/
+cp -r skills/ralph ~/.claude/skills/
+cp -r skills/read-transcript ~/.claude/skills/
 ```
-
-### Configure Amp auto-handoff (recommended)
-
-Add to `~/.config/amp/settings.json`:
-
-```json
-{
-  "amp.experimental.autoHandoff": { "context": 90 }
-}
-```
-
-This enables automatic handoff when context fills up, allowing Ralph to handle large stories that exceed a single context window.
 
 ## Workflow
 
@@ -87,20 +76,40 @@ Ralph will:
 5. Commit if checks pass
 6. Update `prd.json` to mark story as `passes: true`
 7. Append learnings to `progress.txt`
-8. Repeat until all stories pass or max iterations reached
+8. Save full transcript to `transcripts/`
+9. Repeat until all stories pass or max iterations reached
 
 ## Key Files
 
 | File | Purpose |
 |------|---------|
-| `ralph.sh` | The bash loop that spawns fresh Amp instances |
-| `prompt.md` | Instructions given to each Amp instance |
+| `ralph.sh` | The bash loop that spawns fresh Claude instances |
+| `prompt.md` | Instructions given to each Claude instance |
 | `prd.json` | User stories with `passes` status (the task list) |
 | `prd.json.example` | Example PRD format for reference |
 | `progress.txt` | Append-only learnings for future iterations |
+| `transcripts/` | Full logs from each iteration for deep context |
+| `transcripts/index.json` | Searchable index of all transcripts |
 | `skills/prd/` | Skill for generating PRDs |
 | `skills/ralph/` | Skill for converting PRDs to JSON |
+| `skills/read-transcript/` | Skill for searching previous iteration transcripts |
 | `flowchart/` | Interactive visualization of how Ralph works |
+
+## Transcript Search
+
+Ralph logs full transcripts from each iteration to `transcripts/`. This provides "deep memory" - future iterations can look back at exactly what happened in previous runs.
+
+Use the `read-transcript` skill to search previous iterations:
+
+```
+Load the read-transcript skill and find iterations related to [topic]
+```
+
+Search by:
+- **Story ID**: `search transcripts for story US-003`
+- **Date range**: `search transcripts from 2026-01-15`
+- **Branch**: `search transcripts for branch ralph/auth-system`
+- **Iteration**: `read transcript from iteration 5`
 
 ## Flowchart
 
@@ -120,10 +129,11 @@ npm run dev
 
 ### Each Iteration = Fresh Context
 
-Each iteration spawns a **new Amp instance** with clean context. The only memory between iterations is:
+Each iteration spawns a **new Claude instance** with clean context. The only memory between iterations is:
 - Git history (commits from previous iterations)
 - `progress.txt` (learnings and context)
 - `prd.json` (which stories are done)
+- `transcripts/` (full logs for deep context via read-transcript skill)
 
 ### Small Tasks
 
@@ -142,7 +152,7 @@ Too big (split these):
 
 ### AGENTS.md Updates Are Critical
 
-After each iteration, Ralph updates the relevant `AGENTS.md` files with learnings. This is key because Amp automatically reads these files, so future iterations (and future human developers) benefit from discovered patterns, gotchas, and conventions.
+After each iteration, Ralph updates the relevant `AGENTS.md` files with learnings. This is key because Claude automatically reads these files, so future iterations (and future human developers) benefit from discovered patterns, gotchas, and conventions.
 
 Examples of what to add to AGENTS.md:
 - Patterns discovered ("this codebase uses X for Y")
@@ -177,6 +187,12 @@ cat progress.txt
 
 # Check git history
 git log --oneline -10
+
+# See transcript index
+cat transcripts/index.json | jq '.transcripts[]'
+
+# Read a specific transcript
+cat transcripts/2026-01-17-14-30-00-iteration-1.txt
 ```
 
 ## Customizing prompt.md
@@ -188,9 +204,9 @@ Edit `prompt.md` to customize Ralph's behavior for your project:
 
 ## Archiving
 
-Ralph automatically archives previous runs when you start a new feature (different `branchName`). Archives are saved to `archive/YYYY-MM-DD-feature-name/`.
+Ralph automatically archives previous runs when you start a new feature (different `branchName`). Archives are saved to `archive/YYYY-MM-DD-feature-name/` and include `prd.json`, `progress.txt`, and `transcripts/`.
 
 ## References
 
 - [Geoffrey Huntley's Ralph article](https://ghuntley.com/ralph/)
-- [Amp documentation](https://ampcode.com/manual)
+- [Claude Code documentation](https://docs.anthropic.com/en/docs/claude-code)
