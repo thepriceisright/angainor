@@ -14,6 +14,47 @@ TRANSCRIPT_DIR="$SCRIPT_DIR/transcripts"
 TRANSCRIPT_INDEX="$TRANSCRIPT_DIR/index.json"
 METRICS_FILE="$SCRIPT_DIR/metrics.json"
 
+# Print metrics summary on loop completion
+print_metrics_summary() {
+  if [ ! -f "$METRICS_FILE" ] || [ ! -s "$METRICS_FILE" ]; then
+    echo "No metrics data available."
+    return
+  fi
+
+  local total_iterations successful_stories blocked_stories failed_iterations
+  local total_duration avg_duration
+
+  total_iterations=$(jq '.iterations | length' "$METRICS_FILE")
+  successful_stories=$(jq '[.iterations[] | select(.status == "success")] | length' "$METRICS_FILE")
+  blocked_stories=$(jq '[.iterations[] | select(.status == "blocked")] | length' "$METRICS_FILE")
+  failed_iterations=$(jq '[.iterations[] | select(.status == "failed")] | length' "$METRICS_FILE")
+  total_duration=$(jq '[.iterations[].duration_seconds] | add // 0' "$METRICS_FILE")
+
+  if [ "$total_iterations" -gt 0 ]; then
+    avg_duration=$((total_duration / total_iterations))
+  else
+    avg_duration=0
+  fi
+
+  # Format duration as human-readable
+  local total_mins=$((total_duration / 60))
+  local total_secs=$((total_duration % 60))
+  local avg_mins=$((avg_duration / 60))
+  local avg_secs=$((avg_duration % 60))
+
+  echo ""
+  echo "═══════════════════════════════════════════════════════"
+  echo "  RALPH METRICS SUMMARY"
+  echo "═══════════════════════════════════════════════════════"
+  echo "  Total iterations:     $total_iterations"
+  echo "  Successful stories:   $successful_stories"
+  echo "  Blocked stories:      $blocked_stories"
+  echo "  Failed iterations:    $failed_iterations"
+  echo "  Total duration:       ${total_mins}m ${total_secs}s"
+  echo "  Average time/story:   ${avg_mins}m ${avg_secs}s"
+  echo "═══════════════════════════════════════════════════════"
+}
+
 # Record metrics for an iteration
 # Arguments: status story_id failure_reason
 record_metrics() {
@@ -199,6 +240,7 @@ EOF
     echo ""
     echo "Ralph completed all tasks!"
     echo "Completed at iteration $i of $MAX_ITERATIONS"
+    print_metrics_summary
     exit 0
   fi
 
@@ -209,4 +251,5 @@ done
 echo ""
 echo "Ralph reached max iterations ($MAX_ITERATIONS) without completing all tasks."
 echo "Check $PROGRESS_FILE for status."
+print_metrics_summary
 exit 1
