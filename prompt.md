@@ -27,6 +27,17 @@ Before implementing anything, verify system state:
 
 If any check fails, document the issue in progress.txt and attempt recovery before implementing the current story.
 
+## Pre-Implementation Checklist
+
+Before writing code, validate story feasibility:
+
+1. **Scope Clarity**: Can you describe the change in 2-3 sentences? If not, the story may be too vague.
+2. **Dependency Map**: Identify all files to modify (max 5). If more than 5, consider splitting the story.
+3. **Test Strategy**: Know how you'll verify success before starting. What command proves completion?
+4. **Failure Modes**: Identify what could go wrong. Have a fallback if the primary approach fails.
+
+If any item cannot be satisfied, document the issue in progress.txt and consider skipping to the next story.
+
 ## Progress Report Format
 
 APPEND to progress.txt (never replace, always append):
