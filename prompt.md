@@ -15,6 +15,18 @@ You are an autonomous coding agent working on a software project.
 9. Update the PRD to set `passes: true` for the completed story
 10. Append your progress to `progress.txt`
 
+## Start-of-Iteration Verification
+
+Before implementing anything, verify system state:
+
+1. **Git Status**: Run `git status`. Working directory should be clean (no uncommitted changes from previous iteration). If dirty, investigate before proceeding.
+
+2. **prd.json Validity**: Confirm prd.json parses as valid JSON and contains a `userStories` array. If malformed, fix it before proceeding.
+
+3. **progress.txt Continuity**: Read progress.txt. The last entry should match the last completed story in prd.json. If there's a mismatch, investigate (possible incomplete iteration).
+
+If any check fails, document the issue in progress.txt and attempt recovery before implementing the current story.
+
 ## Progress Report Format
 
 APPEND to progress.txt (never replace, always append):
