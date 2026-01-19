@@ -114,6 +114,20 @@ For any story that changes UI, you MUST verify it works in the browser:
 
 A frontend story is NOT complete until browser verification passes.
 
+## Before Marking Story Complete
+
+Before setting `passes: true`, you MUST verify each acceptance criterion with evidence:
+
+```
+<verification>
+Criterion: [Exact text from acceptance criteria]
+Evidence: [Command output, line numbers, or concrete proof]
+Conclusion: SATISFIED | NOT_SATISFIED
+</verification>
+```
+
+Repeat for EACH criterion. If ANY criterion is NOT_SATISFIED, do not mark the story complete.
+
 ## Stop Condition
 
 After completing a user story, check if ALL stories have `passes: true`.
