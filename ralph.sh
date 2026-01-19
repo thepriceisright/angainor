@@ -68,13 +68,17 @@ record_metrics() {
 
   # Calculate lines changed and files changed from git diff
   local lines_changed files_changed
-  lines_changed=$(git diff --stat HEAD~1 2>/dev/null | tail -1 | grep -oP '\d+(?= insertion|\d+(?= deletion))' | paste -sd+ | bc 2>/dev/null || echo "0")
+  # Use awk instead of bc (bc may not be installed)
+  lines_changed=$(git diff --stat HEAD~1 2>/dev/null | tail -1 | awk '{ins=$1; del=$4; total=(ins+0)+(del+0); print (total>0 ? total : 0)}')
+  lines_changed=${lines_changed:-0}
   files_changed=$(git diff --stat HEAD~1 2>/dev/null | grep -c '|' 2>/dev/null || echo "0")
 
   # Estimate tokens from transcript word count (words × 1.3)
+  # Use bash arithmetic instead of bc: (words * 13) / 10
   local word_count estimated_tokens
-  word_count=$(wc -w < "$TRANSCRIPT_FILE" 2>/dev/null || echo "0")
-  estimated_tokens=$(echo "$word_count * 1.3" | bc 2>/dev/null | cut -d. -f1 || echo "0")
+  word_count=$(wc -w < "$TRANSCRIPT_FILE" 2>/dev/null | tr -d ' ' || echo "0")
+  word_count=${word_count:-0}
+  estimated_tokens=$(( (word_count * 13) / 10 ))
 
   # Append metrics to JSON file
   jq --arg ts "$TIMESTAMP" \
