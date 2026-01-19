@@ -155,6 +155,16 @@ For any story that changes UI, you MUST verify it works in the browser:
 
 A frontend story is NOT complete until browser verification passes.
 
+## Before Running Git Commit
+
+Pause before committing. Ask yourself:
+
+1. **Does it work?** Have you run the code and verified it behaves correctly?
+2. **Is it complete?** Does it satisfy ALL acceptance criteria, not just most?
+3. **Is it safe?** No hardcoded secrets, no security vulnerabilities, no broken tests?
+
+If any answer is "no" or "unsure," fix it before committing.
+
 ## Before Marking Story Complete
 
 Before setting `passes: true`, you MUST verify each acceptance criterion with evidence:
