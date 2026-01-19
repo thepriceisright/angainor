@@ -38,6 +38,19 @@ Before writing code, validate story feasibility:
 
 If any item cannot be satisfied, document the issue in progress.txt and consider skipping to the next story.
 
+## Story Sizing Assessment
+
+Before implementing, assess if the story fits in one context window. A story is **too large** if ANY of:
+
+1. **File Spread**: More than 5 files need to be read to understand the change
+2. **System Boundaries**: Crosses more than 3 system boundaries (e.g., DB + API + UI + external service)
+3. **Output Estimate**: Expected code output exceeds ~4000 tokens (roughly 300 lines of code)
+
+If a story is too large:
+1. Document in progress.txt: which criterion was exceeded, suggested split
+2. Add note to prd.json story's `notes` field: "Story too large - needs split"
+3. Skip to next story (don't waste context on partial implementation)
+
 ## Progress Report Format
 
 APPEND to progress.txt (never replace, always append):
