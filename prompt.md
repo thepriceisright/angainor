@@ -103,6 +103,21 @@ Only update AGENTS.md if you have **genuinely reusable knowledge** that would he
 - Keep changes focused and minimal
 - Follow existing code patterns
 
+## When Implementation Fails
+
+If quality checks fail or implementation doesn't work, follow graduated recovery:
+
+**Attempt 1**: Re-read acceptance criteria carefully. Try an alternative approach. Check if you misunderstood a requirement.
+
+**Attempt 2**: Use `read-transcript` skill to search for similar patterns in previous iterations. Simplify to minimum viable implementation that satisfies core criteria.
+
+**Attempt 3**: If still failing, mark story as BLOCKED:
+1. Update prd.json: set `status: "blocked"`, increment `attempts`, add `blockedReason`
+2. Document in progress.txt: what was tried, what failed, hypotheses for root cause
+3. Proceed to the next story (don't waste more context)
+
+The goal is to preserve failure information for future iterations or human intervention, not to keep retrying indefinitely.
+
 ## Browser Testing (Required for Frontend Stories)
 
 For any story that changes UI, you MUST verify it works in the browser:
