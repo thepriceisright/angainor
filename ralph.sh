@@ -110,6 +110,41 @@ EOF
      '.transcripts += [{"file": $file, "timestamp": $ts, "iteration": ($iter|tonumber), "branch": $branch, "storyId": $story}]' \
      "$TRANSCRIPT_INDEX" > "$TRANSCRIPT_INDEX.tmp" && mv "$TRANSCRIPT_INDEX.tmp" "$TRANSCRIPT_INDEX"
 
+  # Verify that verification blocks were provided (enforcement of US-003 requirement)
+  VERIFICATION_FAILED=false
+  FAILURE_REASON=""
+
+  # Check if any verification blocks exist
+  if ! echo "$OUTPUT" | grep -q "<verification>"; then
+    VERIFICATION_FAILED=true
+    FAILURE_REASON="Missing <verification> blocks - story completion requires structured verification"
+  else
+    # Check for NOT_SATISFIED conclusions
+    if echo "$OUTPUT" | grep -q "Conclusion: NOT_SATISFIED"; then
+      VERIFICATION_FAILED=true
+      FAILURE_REASON="Verification failed - one or more criteria marked NOT_SATISFIED"
+    fi
+  fi
+
+  # If verification failed, log to transcript and skip counting this as success
+  if [ "$VERIFICATION_FAILED" = true ]; then
+    echo ""
+    echo "⚠ VERIFICATION ENFORCEMENT FAILED"
+    echo "  Reason: $FAILURE_REASON"
+    echo "  This iteration does not count toward story completion."
+
+    # Append failure reason to transcript
+    cat >> "$TRANSCRIPT_FILE" << EOF
+# VERIFICATION ENFORCEMENT
+Status: FAILED
+Reason: $FAILURE_REASON
+EOF
+
+    echo "Iteration $i failed verification. Continuing..."
+    sleep 2
+    continue
+  fi
+
   # Check for completion signal
   if echo "$OUTPUT" | grep -q "<promise>COMPLETE</promise>"; then
     echo ""
