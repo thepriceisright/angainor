@@ -12,11 +12,51 @@ ARCHIVE_DIR="$SCRIPT_DIR/archive"
 LAST_BRANCH_FILE="$SCRIPT_DIR/.last-branch"
 TRANSCRIPT_DIR="$SCRIPT_DIR/transcripts"
 TRANSCRIPT_INDEX="$TRANSCRIPT_DIR/index.json"
+METRICS_FILE="$SCRIPT_DIR/metrics.json"
+
+# Record metrics for an iteration
+# Arguments: status story_id failure_reason
+record_metrics() {
+  local status="$1"
+  local story_id="$2"
+  local failure_reason="${3:-}"
+
+  local iteration_end
+  iteration_end=$(date +%s)
+  local duration=$((iteration_end - ITERATION_START))
+
+  # Calculate lines changed and files changed from git diff
+  local lines_changed files_changed
+  lines_changed=$(git diff --stat HEAD~1 2>/dev/null | tail -1 | grep -oP '\d+(?= insertion|\d+(?= deletion))' | paste -sd+ | bc 2>/dev/null || echo "0")
+  files_changed=$(git diff --stat HEAD~1 2>/dev/null | grep -c '|' 2>/dev/null || echo "0")
+
+  # Estimate tokens from transcript word count (words × 1.3)
+  local word_count estimated_tokens
+  word_count=$(wc -w < "$TRANSCRIPT_FILE" 2>/dev/null || echo "0")
+  estimated_tokens=$(echo "$word_count * 1.3" | bc 2>/dev/null | cut -d. -f1 || echo "0")
+
+  # Append metrics to JSON file
+  jq --arg ts "$TIMESTAMP" \
+     --argjson dur "$duration" \
+     --arg sid "$story_id" \
+     --arg st "$status" \
+     --argjson lc "$lines_changed" \
+     --argjson fc "$files_changed" \
+     --argjson et "$estimated_tokens" \
+     --arg fr "$failure_reason" \
+     '.iterations += [{"timestamp": $ts, "duration_seconds": $dur, "story_id": $sid, "status": $st, "lines_changed": $lc, "files_changed": $fc, "estimated_tokens": $et, "failure_reason": $fr}]' \
+     "$METRICS_FILE" > "$METRICS_FILE.tmp" && mv "$METRICS_FILE.tmp" "$METRICS_FILE"
+}
 
 # Initialize transcript directory and index
 mkdir -p "$TRANSCRIPT_DIR"
 if [ ! -f "$TRANSCRIPT_INDEX" ]; then
   echo '{"transcripts": []}' > "$TRANSCRIPT_INDEX"
+fi
+
+# Initialize metrics file
+if [ ! -f "$METRICS_FILE" ]; then
+  echo '{"iterations": []}' > "$METRICS_FILE"
 fi
 
 # Archive previous run if branch changed
@@ -75,6 +115,9 @@ for i in $(seq 1 $MAX_ITERATIONS); do
   echo "═══════════════════════════════════════════════════════"
   echo "  Ralph Iteration $i of $MAX_ITERATIONS"
   echo "═══════════════════════════════════════════════════════"
+
+  # Capture iteration start time for metrics
+  ITERATION_START=$(date +%s)
 
   # Generate transcript filename
   TIMESTAMP=$(date +%Y-%m-%d-%H-%M-%S)
@@ -140,10 +183,16 @@ Status: FAILED
 Reason: $FAILURE_REASON
 EOF
 
+    # Record failed iteration metrics
+    record_metrics "failed" "$STORY_ID" "$FAILURE_REASON"
+
     echo "Iteration $i failed verification. Continuing..."
     sleep 2
     continue
   fi
+
+  # Record successful iteration metrics
+  record_metrics "success" "$STORY_ID" ""
 
   # Check for completion signal
   if echo "$OUTPUT" | grep -q "<promise>COMPLETE</promise>"; then
