@@ -116,6 +116,23 @@ Only update AGENTS.md if you have **genuinely reusable knowledge** that would he
 - Keep changes focused and minimal
 - Follow existing code patterns
 
+## Code Review Strategy
+
+When receiving code review feedback, distinguish between:
+
+**FIX (must address):**
+- Security vulnerabilities
+- Runtime errors or crashes
+- Type safety violations
+- Logic bugs that break functionality
+
+**SKIP (do not address this iteration):**
+- Style preferences in pre-existing code
+- Refactoring suggestions beyond the story scope
+- "Nice to have" improvements
+
+**Limit**: Spend max 1 iteration on code review fixes per story. If fixes require more than one iteration, document remaining items in progress.txt and move on.
+
 ## Implementation Grounding Rules
 
 To prevent hallucinated implementations, follow these rules:
