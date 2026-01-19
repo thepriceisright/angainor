@@ -116,6 +116,19 @@ Only update AGENTS.md if you have **genuinely reusable knowledge** that would he
 - Keep changes focused and minimal
 - Follow existing code patterns
 
+## Implementation Grounding Rules
+
+To prevent hallucinated implementations, follow these rules:
+
+1. **No Invented APIs**: Only use libraries, functions, or patterns you can verify exist in the codebase or documentation. If unsure, search first.
+
+2. **No Assumed Patterns**: Before implementing, find an existing example of the pattern in this codebase. Reference it explicitly (file:line).
+
+3. **Uncertainty Protocol**: When uncertain about implementation details:
+   - Document the uncertainty in your reasoning
+   - Implement the simplest version that satisfies acceptance criteria
+   - Note assumptions in progress.txt for future iterations
+
 ## When Implementation Fails
 
 If quality checks fail or implementation doesn't work, follow graduated recovery:
