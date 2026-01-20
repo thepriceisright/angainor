@@ -46,6 +46,18 @@ restore_plugins() {
   done
 }
 
+# Trap handler for cleanup on exit (normal, error, or interrupt)
+cleanup_on_exit() {
+  local exit_code=$?
+  restore_plugins
+  exit $exit_code
+}
+
+# Register cleanup traps - EXIT covers normal exit and set -e failures
+# SIGINT covers Ctrl+C interrupts
+trap cleanup_on_exit EXIT
+trap 'trap - EXIT; cleanup_on_exit' INT
+
 # Print metrics summary on loop completion
 print_metrics_summary() {
   if [ ! -f "$METRICS_FILE" ] || [ ! -s "$METRICS_FILE" ]; then
@@ -184,6 +196,9 @@ if [ ! -f "$PROGRESS_FILE" ]; then
   echo "Started: $(date)" >> "$PROGRESS_FILE"
   echo "---" >> "$PROGRESS_FILE"
 fi
+
+# Configure Ralph profile (disable interfering plugins) before main loop
+configure_ralph_profile
 
 echo "Starting Ralph - Max iterations: $MAX_ITERATIONS"
 
