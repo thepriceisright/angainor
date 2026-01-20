@@ -391,6 +391,9 @@ EOF
   # Record successful iteration metrics
   record_metrics "success" "$STORY_ID" ""
 
+  # Extract skill candidates from iteration output (failures don't break loop)
+  write_skill_candidate "$OUTPUT" "$STORY_ID" || true
+
   # Check for completion signal
   if echo "$OUTPUT" | grep -q "<promise>COMPLETE</promise>"; then
     echo ""
