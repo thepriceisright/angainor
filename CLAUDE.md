@@ -109,6 +109,24 @@ ralph.sh writes iteration metrics to `metrics.json` in the script directory:
 ```
 A human-readable summary prints on loop completion.
 
+### Skill Extraction (Claudeception)
+Ralph iterations can extract reusable skills for cross-project learning. When an iteration discovers non-obvious, verified knowledge, it outputs a `<<<SKILL_CANDIDATE>>>` block that ralph.sh parses and writes to disk.
+
+**Quality gates** (all must pass): Non-obvious, reusable beyond this project, verified working, has specific trigger.
+
+**Categories:** `error-resolutions`, `patterns`, `workflows` | **Storage:** `~/.claude/skills/ralph-learnings/<category>/<name>.md`
+
+**Output format:**
+```
+<<<SKILL_CANDIDATE>>>
+category: [error-resolutions|patterns|workflows]
+name: [kebab-case-name]
+description: Use when [trigger]
+content: [Problem, Solution, Example, Verification sections]
+<<<END_SKILL_CANDIDATE>>>
+```
+Skills are automatically available to future Claude Code sessions across all projects.
+
 ## Skills Usage
 
 | Skill | Trigger phrases | Purpose |
