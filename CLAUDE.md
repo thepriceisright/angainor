@@ -102,6 +102,27 @@ angainor.sh configures a minimal plugin environment for autonomous runs:
 - Testing: Framework detection, test runners
 - Domain: Project-specific skills (prd, angainor, read-transcript)
 
+### Headless Browser Testing
+The install script creates `.mcp.json` with Playwright configured for containerized environments:
+
+```json
+{
+  "mcpServers": {
+    "playwright": {
+      "command": "npx",
+      "args": ["@playwright/mcp@latest", "--browser", "chromium", "--headless", "--no-sandbox"]
+    }
+  }
+}
+```
+
+**Key flags:**
+- `--no-sandbox`: Required for Docker/containers without elevated privileges (Chrome sandbox uses Linux namespaces)
+- `--headless`: Run without GUI for autonomous operation
+- `--browser chromium`: Use Chromium (most reliable in containers)
+
+**Browser binaries**: Playwright downloads browsers to `~/.cache/ms-playwright/`. Run `npx playwright install chromium` if missing.
+
 ### Metrics Output
 angainor.sh writes iteration metrics to `metrics.json` in the script directory:
 ```json

@@ -77,6 +77,63 @@ download_file() {
     fi
 }
 
+# Configure MCP for headless browser testing in containers
+configure_mcp_playwright() {
+    log_info "Configuring MCP for headless browser testing..."
+
+    local mcp_config="$TARGET_DIR/.mcp.json"
+
+    # Playwright server configuration for containerized environments
+    # --no-sandbox: Required for Docker/containers without elevated privileges
+    # --headless: Run browser without GUI for autonomous operation
+    # --browser chromium: Use Chromium (most reliable in containers)
+    local playwright_config
+    playwright_config=$(cat << 'PLAYWRIGHT_JSON'
+{
+  "command": "npx",
+  "args": [
+    "@playwright/mcp@latest",
+    "--browser", "chromium",
+    "--headless",
+    "--no-sandbox"
+  ]
+}
+PLAYWRIGHT_JSON
+)
+
+    if [ -f "$mcp_config" ]; then
+        # Merge with existing .mcp.json (add/update playwright server)
+        local tmp_config
+        tmp_config=$(mktemp)
+        if jq --argjson pw "$playwright_config" '.mcpServers.playwright = $pw' "$mcp_config" > "$tmp_config" 2>/dev/null; then
+            mv "$tmp_config" "$mcp_config"
+            log_success "Updated .mcp.json with headless Playwright configuration"
+        else
+            log_warn "Could not parse existing .mcp.json, creating new one"
+            rm -f "$tmp_config"
+            # Fall through to create new file
+            cat > "$mcp_config" << MCP_EOF
+{
+  "mcpServers": {
+    "playwright": $playwright_config
+  }
+}
+MCP_EOF
+            log_success "Created .mcp.json with headless Playwright configuration"
+        fi
+    else
+        # Create new .mcp.json
+        cat > "$mcp_config" << MCP_EOF
+{
+  "mcpServers": {
+    "playwright": $playwright_config
+  }
+}
+MCP_EOF
+        log_success "Created .mcp.json with headless Playwright configuration"
+    fi
+}
+
 # Main installation
 install_angainor() {
     echo ""
@@ -228,6 +285,9 @@ WRAPPER_EOF
     # Note: Skills are installed globally to ~/.claude/skills/ for Claude Code discovery
     log_success "Skills installed globally to ~/.claude/skills/"
 
+    # Configure MCP for headless browser testing
+    configure_mcp_playwright
+
     # Print success message
     echo ""
     echo -e "${GREEN}╔══════════════════════════════════════════════════╗${NC}"
@@ -236,6 +296,7 @@ WRAPPER_EOF
     echo ""
     echo "Installed files:"
     echo "  $TARGET_DIR/angainor.sh          - Main entry point"
+    echo "  $TARGET_DIR/.mcp.json            - MCP config for headless browser testing"
     echo "  $ANGAINOR_DIR/                   - Angainor internals"
     echo "  $ANGAINOR_DIR/prd.json.example   - PRD format reference"
     echo "  ~/.claude/skills/{prd,angainor,read-transcript}/ - Global skills"
