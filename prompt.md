@@ -349,4 +349,37 @@ If there are still stories with `passes: false`, end your response normally (ano
 - Commit frequently
 - Keep CI green
 - Read the Codebase Patterns section in progress.txt before starting
-- **ALWAYS output `<verification>` XML blocks before marking story complete - iterations without them will be rejected**
+
+## MANDATORY RESPONSE FORMAT
+
+Your response MUST end with verification blocks. This is not optional.
+
+For each acceptance criterion in the story, output:
+
+<verification>
+Criterion: [exact text from acceptance criteria]
+Evidence: [command output or proof]
+Conclusion: SATISFIED
+</verification>
+
+Example for a story with 3 acceptance criteria:
+
+<verification>
+Criterion: User can log in with email
+Evidence: Tested POST /login with valid credentials, got 200 OK
+Conclusion: SATISFIED
+</verification>
+
+<verification>
+Criterion: Invalid credentials return 401
+Evidence: Tested POST /login with wrong password, got 401 Unauthorized
+Conclusion: SATISFIED
+</verification>
+
+<verification>
+Criterion: Typecheck passes
+Evidence: Ran npm run typecheck - exit code 0, no errors
+Conclusion: SATISFIED
+</verification>
+
+**If your response does not contain `<verification>` tags, the iteration will be REJECTED and your work will not count.**
