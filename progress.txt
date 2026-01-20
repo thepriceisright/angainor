@@ -1,0 +1,60 @@
+# Ralph Progress Log
+Started: Tue Jan 20 11:35:52 AM CET 2026
+---
+
+## 2026-01-20 - US-001
+Story: US-001 - Add skill extraction instructions to prompt.md
+- Added "Skill Extraction (Claudeception)" section to prompt.md (45 lines)
+- Documented all 4 quality gates (non-obvious, reusable, verified, specific trigger)
+- Documented when NOT to extract (4 cases)
+- Documented the 3 categories (error-resolutions, patterns, workflows)
+- Documented <<<SKILL_CANDIDATE>>> output format with all required fields
+- Files changed: prompt.md
+- **Learnings for future iterations:**
+  - Section placement matters: added after "Before Marking Story Complete" since skill extraction is part of the completion workflow
+  - The delimiter-based format (<<<SKILL_CANDIDATE>>>) is intentionally chosen for reliable bash parsing
+---
+
+## 2026-01-20 - US-002
+Story: US-002 - Add write_skill_candidate function to ralph.sh
+- Added SKILL_DIR constant at line 17 pointing to ~/.claude/skills/ralph-learnings
+- Added write_skill_candidate() function (lines 142-233, ~90 lines)
+- Function extracts all fields: category, name, description, content using sed/grep
+- Validates all required fields are present with specific error messages
+- Validates category against allowed list (error-resolutions, patterns, workflows)
+- Skips gracefully if no block found (returns 0) or if malformed/invalid (returns 1 with warning)
+- Checks for existing skill files and refuses to overwrite
+- Files changed: ralph.sh
+- **Learnings for future iterations:**
+  - shellcheck SC2317 warnings for functions are false positives when functions are called via traps or in future stories
+  - The function already writes skill files (includes lines 208-232) since US-003 file writing is naturally part of the same function
+  - For multiline content extraction, use `sed -n '/pattern/,/endpattern/p' | sed '1d;$d'` to get everything between markers
+---
+
+## 2026-01-20 - US-003
+Story: US-003 - Write skill files with correct format
+- All acceptance criteria already satisfied by US-002 implementation
+- Verified: mkdir -p creates category subdirectories (line 209)
+- Verified: YAML frontmatter with only name and description fields (lines 216-220)
+- Verified: Description preserved exactly as provided (lines 168, 219)
+- Verified: Content body preserved (lines 171, 222)
+- Verified: Origin section with timestamp, project, story ID (lines 224-228)
+- Verified: Success message matches required format (line 231)
+- Verified: shellcheck passes (no errors, only info-level warnings)
+- Files changed: None (already implemented in US-002)
+- **Learnings for future iterations:**
+  - When PRD stories have natural dependencies, earlier stories may implement functionality needed by later stories
+  - US-002 and US-003 were logically a single function - splitting them in the PRD is fine for planning, but implementation naturally combined them
+---
+
+## 2026-01-20 - US-004
+Story: US-004 - Integrate extraction into main loop
+- Added call to write_skill_candidate at ralph.sh line 395
+- Placed after record_metrics "success" line (line 392)
+- Uses `|| true` to prevent extraction failures from breaking main loop
+- Passes both $OUTPUT and $STORY_ID as arguments
+- Files changed: ralph.sh
+- **Learnings for future iterations:**
+  - The `|| true` pattern prevents `set -e` from exiting on non-zero return codes
+  - Unconditional extraction on success is simpler than flag-based control
+---
