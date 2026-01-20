@@ -126,10 +126,10 @@
         "Section is 20 lines or less"
       ],
       "priority": 7,
-      "passes": false,
-      "status": "pending",
-      "attempts": 0,
-      "notes": "Should be done after implementation is complete"
+      "passes": true,
+      "status": "passed",
+      "attempts": 1,
+      "notes": ""
     },
     {
       "id": "US-008",

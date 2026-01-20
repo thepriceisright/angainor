@@ -89,3 +89,16 @@ Story: US-006 - Test bash extraction edge cases
   - With `set -e`, capturing exit codes from functions that return non-zero requires `cmd && exit_code=0 || exit_code=$?` pattern
   - The standard `result=$(cmd); exit_code=$?` pattern causes early script exit with `set -e`
 ---
+
+## 2026-01-20 - US-007
+Story: US-007 - Document auto-learning in CLAUDE.md
+- Added "Skill Extraction (Claudeception)" subsection under Key Patterns (18 lines)
+- Documented all 4 quality gates briefly: non-obvious, reusable, verified, specific trigger
+- Documented output format with all required fields
+- Documented storage location and 3 categories on combined line
+- Noted cross-project learning benefit at start and end of section
+- Files changed: CLAUDE.md
+- **Learnings for future iterations:**
+  - Combining related info on single lines (e.g., Categories | Storage) helps meet line count limits
+  - Line count requirements should include blank lines between sections
+---
