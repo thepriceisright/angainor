@@ -1,0 +1,120 @@
+# Ralph Progress Log
+Started: Tue Jan 20 11:35:52 AM CET 2026
+---
+
+## 2026-01-20 - US-001
+Story: US-001 - Add skill extraction instructions to prompt.md
+- Added "Skill Extraction (Claudeception)" section to prompt.md (45 lines)
+- Documented all 4 quality gates (non-obvious, reusable, verified, specific trigger)
+- Documented when NOT to extract (4 cases)
+- Documented the 3 categories (error-resolutions, patterns, workflows)
+- Documented <<<SKILL_CANDIDATE>>> output format with all required fields
+- Files changed: prompt.md
+- **Learnings for future iterations:**
+  - Section placement matters: added after "Before Marking Story Complete" since skill extraction is part of the completion workflow
+  - The delimiter-based format (<<<SKILL_CANDIDATE>>>) is intentionally chosen for reliable bash parsing
+---
+
+## 2026-01-20 - US-002
+Story: US-002 - Add write_skill_candidate function to ralph.sh
+- Added SKILL_DIR constant at line 17 pointing to ~/.claude/skills/ralph-learnings
+- Added write_skill_candidate() function (lines 142-233, ~90 lines)
+- Function extracts all fields: category, name, description, content using sed/grep
+- Validates all required fields are present with specific error messages
+- Validates category against allowed list (error-resolutions, patterns, workflows)
+- Skips gracefully if no block found (returns 0) or if malformed/invalid (returns 1 with warning)
+- Checks for existing skill files and refuses to overwrite
+- Files changed: ralph.sh
+- **Learnings for future iterations:**
+  - shellcheck SC2317 warnings for functions are false positives when functions are called via traps or in future stories
+  - The function already writes skill files (includes lines 208-232) since US-003 file writing is naturally part of the same function
+  - For multiline content extraction, use `sed -n '/pattern/,/endpattern/p' | sed '1d;$d'` to get everything between markers
+---
+
+## 2026-01-20 - US-003
+Story: US-003 - Write skill files with correct format
+- All acceptance criteria already satisfied by US-002 implementation
+- Verified: mkdir -p creates category subdirectories (line 209)
+- Verified: YAML frontmatter with only name and description fields (lines 216-220)
+- Verified: Description preserved exactly as provided (lines 168, 219)
+- Verified: Content body preserved (lines 171, 222)
+- Verified: Origin section with timestamp, project, story ID (lines 224-228)
+- Verified: Success message matches required format (line 231)
+- Verified: shellcheck passes (no errors, only info-level warnings)
+- Files changed: None (already implemented in US-002)
+- **Learnings for future iterations:**
+  - When PRD stories have natural dependencies, earlier stories may implement functionality needed by later stories
+  - US-002 and US-003 were logically a single function - splitting them in the PRD is fine for planning, but implementation naturally combined them
+---
+
+## 2026-01-20 - US-004
+Story: US-004 - Integrate extraction into main loop
+- Added call to write_skill_candidate at ralph.sh line 395
+- Placed after record_metrics "success" line (line 392)
+- Uses `|| true` to prevent extraction failures from breaking main loop
+- Passes both $OUTPUT and $STORY_ID as arguments
+- Files changed: ralph.sh
+- **Learnings for future iterations:**
+  - The `|| true` pattern prevents `set -e` from exiting on non-zero return codes
+  - Unconditional extraction on success is simpler than flag-based control
+---
+
+## 2026-01-20 - US-005
+Story: US-005 - Test bash extraction with valid input
+- Created test script scripts/test-skill-extraction.sh (415 lines)
+- Tests valid skill extraction with 4 test functions:
+  - test_valid_extraction: verifies all fields extracted, directory/file created, frontmatter correct, content preserved, origin section present
+  - test_directory_structure: verifies all 3 category directories created correctly
+  - test_yaml_frontmatter: verifies exactly 2 fields (name, description), no category field
+  - test_multiline_content: verifies sections, code blocks, lists, multi-paragraph text preserved
+- All 31 assertions pass, shellcheck passes with no warnings
+- Files changed: scripts/test-skill-extraction.sh
+- **Learnings for future iterations:**
+  - When using grep -qF with patterns that start with `-`, use `grep -qF -- "$pattern"` to prevent interpretation as options
+  - In bash, avoid `(())` arithmetic with set -e when the value could be 0 (returns non-zero exit); use `VAR=$((VAR + 1))` instead
+  - Use shellcheck disable comments for expected false positives: SC2317 (trap functions), SC2034 (eval'd function vars), SC2016 (intentional literal strings)
+---
+
+## 2026-01-20 - US-006
+Story: US-006 - Test bash extraction edge cases
+- Extended scripts/test-skill-extraction.sh with 4 edge case test functions:
+  - test_missing_block: verifies function returns 0 with no output when no skill block present
+  - test_malformed_block: verifies warnings for missing category, name, description, content, and end delimiter
+  - test_invalid_category: verifies warnings for invalid and typo categories
+  - test_duplicate_skill: verifies warning and no overwrite when skill already exists
+- Added helper assertions: assert_file_not_exists, assert_exit_code, assert_output_empty
+- All 60 assertions pass, shellcheck passes with no errors
+- Files changed: scripts/test-skill-extraction.sh
+- **Learnings for future iterations:**
+  - With `set -e`, capturing exit codes from functions that return non-zero requires `cmd && exit_code=0 || exit_code=$?` pattern
+  - The standard `result=$(cmd); exit_code=$?` pattern causes early script exit with `set -e`
+---
+
+## 2026-01-20 - US-007
+Story: US-007 - Document auto-learning in CLAUDE.md
+- Added "Skill Extraction (Claudeception)" subsection under Key Patterns (18 lines)
+- Documented all 4 quality gates briefly: non-obvious, reusable, verified, specific trigger
+- Documented output format with all required fields
+- Documented storage location and 3 categories on combined line
+- Noted cross-project learning benefit at start and end of section
+- Files changed: CLAUDE.md
+- **Learnings for future iterations:**
+  - Combining related info on single lines (e.g., Categories | Storage) helps meet line count limits
+  - Line count requirements should include blank lines between sections
+---
+
+## 2026-01-20 - US-008
+Story: US-008 - End-to-end integration test
+- Created scripts/test-e2e-skill-extraction.sh (450 lines)
+- Tests complete flow: mock Ralph iteration output → skill extraction → file on disk
+- 3 test functions: test_e2e_integration, test_multiple_categories, test_cleanup
+- Validates all 7 acceptance criteria with 26 assertions
+- Verifies YAML frontmatter, content preservation, Origin section, directory structure
+- Tests all 3 categories: error-resolutions, patterns, workflows
+- Uses temp directories for isolation, cleanup via trap on EXIT
+- Files changed: scripts/test-e2e-skill-extraction.sh
+- **Learnings for future iterations:**
+  - E2E tests should simulate realistic iteration output (verification blocks, story structure)
+  - Mock PRD file needed for testing functions that read project metadata
+  - Testing file cleanup verification: check artifacts exist before trap-based cleanup runs
+---

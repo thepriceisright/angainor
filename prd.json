@@ -1,0 +1,154 @@
+{
+  "project": "AutoLearning",
+  "branchName": "ralph/auto-learning",
+  "description": "Auto-Learning (Claudeception Integration) - Automatic skill extraction from Ralph iterations for cross-project learning",
+  "userStories": [
+    {
+      "id": "US-001",
+      "title": "Add skill extraction instructions to prompt.md",
+      "description": "As a Ralph iteration, I need instructions on when and how to evaluate for skill extraction so I can output candidates when quality gates pass.",
+      "acceptanceCriteria": [
+        "Add 'Skill Extraction (Claudeception)' section to prompt.md",
+        "Document all 4 quality gates (non-obvious, reusable, verified, specific trigger)",
+        "Document when to extract vs when NOT to extract",
+        "Document the 3 categories (error-resolutions, patterns, workflows)",
+        "Document the <<<SKILL_CANDIDATE>>> output format with all required fields",
+        "Section is 60 lines or less"
+      ],
+      "priority": 1,
+      "passes": true,
+      "status": "passed",
+      "attempts": 1,
+      "notes": ""
+    },
+    {
+      "id": "US-002",
+      "title": "Add write_skill_candidate function to ralph.sh",
+      "description": "As ralph.sh, I need to detect and parse skill candidate blocks from iteration output so skills can be written to disk.",
+      "acceptanceCriteria": [
+        "Add SKILL_DIR constant pointing to ~/.claude/skills/ralph-learnings",
+        "Add write_skill_candidate() function that extracts category, name, description, content",
+        "Function validates all required fields are present",
+        "Function validates category is in allowed list (error-resolutions, patterns, workflows)",
+        "Function skips gracefully if block malformed or missing",
+        "Function skips if skill with same name already exists (no overwrites)",
+        "Script passes shellcheck"
+      ],
+      "priority": 2,
+      "passes": true,
+      "status": "passed",
+      "attempts": 1,
+      "notes": ""
+    },
+    {
+      "id": "US-003",
+      "title": "Write skill files with correct format",
+      "description": "As ralph.sh, I need to write extracted skills with proper SKILL.md format so Claude Code can discover and load them.",
+      "acceptanceCriteria": [
+        "Create category subdirectory if it doesn't exist",
+        "Write skill file with YAML frontmatter (only name and description fields)",
+        "Description preserved exactly as provided (should start with 'Use when...')",
+        "Content body preserved with all sections",
+        "Append Origin section with extracted timestamp, project name, and story ID",
+        "Output success message: '✓ Extracted skill: [category]/[name].md'",
+        "Script passes shellcheck"
+      ],
+      "priority": 3,
+      "passes": true,
+      "status": "passed",
+      "attempts": 1,
+      "notes": "Already implemented in US-002 - file writing logic was part of write_skill_candidate function"
+    },
+    {
+      "id": "US-004",
+      "title": "Integrate extraction into main loop",
+      "description": "As ralph.sh, I need to call skill extraction after successful iterations so discoveries are captured automatically.",
+      "acceptanceCriteria": [
+        "Call write_skill_candidate after record_metrics 'success' line",
+        "Pass OUTPUT and STORY_ID to function",
+        "Extraction runs on every successful iteration (no flag needed)",
+        "Extraction failures don't break the main loop",
+        "Script passes shellcheck"
+      ],
+      "priority": 4,
+      "passes": true,
+      "status": "passed",
+      "attempts": 1,
+      "notes": "Depends on US-002 and US-003 (function must be complete)"
+    },
+    {
+      "id": "US-005",
+      "title": "Test bash extraction with valid input",
+      "description": "As a developer, I need to verify the extraction function works correctly with well-formed input.",
+      "acceptanceCriteria": [
+        "Create test script scripts/test-skill-extraction.sh",
+        "Test extracts all fields correctly from valid skill candidate block",
+        "Test creates correct directory structure",
+        "Test writes valid YAML frontmatter",
+        "Test preserves multiline content correctly",
+        "All assertions pass",
+        "Test script passes shellcheck"
+      ],
+      "priority": 5,
+      "passes": true,
+      "status": "passed",
+      "attempts": 1,
+      "notes": "Depends on US-004 (full implementation must exist to test)"
+    },
+    {
+      "id": "US-006",
+      "title": "Test bash extraction edge cases",
+      "description": "As a developer, I need to verify the extraction function handles edge cases gracefully.",
+      "acceptanceCriteria": [
+        "Test: missing skill candidate block returns 0, no output",
+        "Test: malformed block (missing fields) shows warning, no file created",
+        "Test: invalid category shows warning, no file created",
+        "Test: duplicate skill name shows warning, existing file not overwritten",
+        "All assertions pass",
+        "Test script passes shellcheck"
+      ],
+      "priority": 6,
+      "passes": true,
+      "status": "passed",
+      "attempts": 1,
+      "notes": "Depends on US-005 (test infrastructure must exist)"
+    },
+    {
+      "id": "US-007",
+      "title": "Document auto-learning in CLAUDE.md",
+      "description": "As a developer reading CLAUDE.md, I need to understand the auto-learning feature so I know how it works.",
+      "acceptanceCriteria": [
+        "Add 'Skill Extraction (Claudeception)' subsection under Key Patterns",
+        "Document quality gates (brief summary)",
+        "Document output format reference",
+        "Document storage location and categories",
+        "Note cross-project learning benefit",
+        "Section is 20 lines or less"
+      ],
+      "priority": 7,
+      "passes": true,
+      "status": "passed",
+      "attempts": 1,
+      "notes": ""
+    },
+    {
+      "id": "US-008",
+      "title": "End-to-end integration test",
+      "description": "As a developer, I need to verify the complete flow works from iteration output to skill file on disk.",
+      "acceptanceCriteria": [
+        "Run a mock Ralph iteration with skill candidate in output",
+        "Verify skill file created at correct path",
+        "Verify skill file has valid YAML frontmatter",
+        "Verify skill file content matches input",
+        "Verify Origin section populated correctly",
+        "Clean up test artifacts after test",
+        "Test script passes shellcheck"
+      ],
+      "priority": 8,
+      "passes": true,
+      "status": "passed",
+      "attempts": 1,
+      "notes": "Final verification - depends on all previous stories"
+    }
+  ]
+}

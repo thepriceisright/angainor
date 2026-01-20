@@ -255,6 +255,52 @@ Conclusion: SATISFIED
 
 Repeat for EACH criterion. Do NOT use markdown checkboxes or summaries - output the literal XML tags. If ANY criterion is NOT_SATISFIED, do not mark the story complete.
 
+## Skill Extraction (Claudeception)
+
+After verification passes, evaluate if this iteration discovered **extractable knowledge**. ralph.sh will automatically capture valid skill candidates for cross-project learning.
+
+### Quality Gates (ALL must pass)
+
+1. **Non-obvious**: Would a competent developer NOT know this without the discovery?
+2. **Reusable**: Does it apply beyond this specific story/project?
+3. **Verified**: Was it tested and confirmed working in this iteration?
+4. **Specific trigger**: Can you define exactly when to apply it?
+
+### When NOT to Extract
+
+- Standard library/framework usage (documented elsewhere)
+- Project-specific conventions (belong in progress.txt or AGENTS.md)
+- Partial solutions or workarounds that need refinement
+- Knowledge already in your skill library
+
+### Categories
+
+- `error-resolutions`: Fixes for cryptic errors, version conflicts, tool quirks
+- `patterns`: Reusable code patterns, architectural approaches, integration recipes
+- `workflows`: Multi-step processes, debugging strategies, verification techniques
+
+### Output Format
+
+If quality gates pass, output EXACTLY this block (ralph.sh parses it):
+
+```
+<<<SKILL_CANDIDATE>>>
+category: [error-resolutions|patterns|workflows]
+name: [kebab-case-name]
+description: Use when [specific trigger condition]
+content:
+[Skill body with Problem, Solution, Example, and Verification sections]
+<<<END_SKILL_CANDIDATE>>>
+```
+
+**Required content sections:**
+- **Problem**: What situation triggers this skill
+- **Solution**: The fix or approach (be specific)
+- **Example**: Code or commands showing the solution
+- **Verification**: How to confirm it worked
+
+If no quality gates pass, output nothing. Most iterations won't extract skills—that's expected.
+
 ## Stop Condition
 
 After completing a user story, check if ALL stories have `passes: true`.

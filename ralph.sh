@@ -14,6 +14,7 @@ TRANSCRIPT_DIR="$SCRIPT_DIR/transcripts"
 TRANSCRIPT_INDEX="$TRANSCRIPT_DIR/index.json"
 METRICS_FILE="$SCRIPT_DIR/metrics.json"
 SCREENSHOT_DIR="$SCRIPT_DIR/screenshots"
+SKILL_DIR="$HOME/.claude/skills/ralph-learnings"
 
 # Plugins to disable during Ralph runs (interfering with autonomous execution)
 RALPH_DISABLE_PLUGINS=(
@@ -116,7 +117,7 @@ record_metrics() {
   # Use awk instead of bc (bc may not be installed)
   lines_changed=$(git diff --stat HEAD~1 2>/dev/null | tail -1 | awk '{ins=$1; del=$4; total=(ins+0)+(del+0); print (total>0 ? total : 0)}')
   lines_changed=${lines_changed:-0}
-  files_changed=$(git diff --stat HEAD~1 2>/dev/null | grep -c '|' 2>/dev/null || echo "0")
+  files_changed=$(git diff --stat HEAD~1 2>/dev/null | grep -c '|' 2>/dev/null) || files_changed=0
 
   # Estimate tokens from transcript word count (words × 1.3)
   # Use bash arithmetic instead of bc: (words * 13) / 10
@@ -136,6 +137,99 @@ record_metrics() {
      --arg fr "$failure_reason" \
      '.iterations += [{"timestamp": $ts, "duration_seconds": $dur, "story_id": $sid, "status": $st, "lines_changed": $lc, "files_changed": $fc, "estimated_tokens": $et, "failure_reason": $fr}]' \
      "$METRICS_FILE" > "$METRICS_FILE.tmp" && mv "$METRICS_FILE.tmp" "$METRICS_FILE"
+}
+
+# Extract and write skill candidate from iteration output
+# Arguments: output_text story_id
+# Returns: 0 if skill extracted, 1 if no skill or skipped
+write_skill_candidate() {
+  local output="$1"
+  local story_id="$2"
+
+  # Check if skill candidate block exists
+  if ! echo "$output" | grep -q "<<<SKILL_CANDIDATE>>>"; then
+    return 0  # No skill candidate, not an error
+  fi
+
+  # Extract the skill candidate block
+  local skill_block
+  skill_block=$(echo "$output" | sed -n '/<<<SKILL_CANDIDATE>>>/,/<<<END_SKILL_CANDIDATE>>>/p')
+
+  if [ -z "$skill_block" ]; then
+    echo "  ⚠ Skill candidate block found but malformed (missing end delimiter)"
+    return 1
+  fi
+
+  # Extract fields using sed
+  local category name description content
+
+  category=$(echo "$skill_block" | grep "^category:" | sed 's/^category:[[:space:]]*//' | head -1)
+  name=$(echo "$skill_block" | grep "^name:" | sed 's/^name:[[:space:]]*//' | head -1)
+  description=$(echo "$skill_block" | grep "^description:" | sed 's/^description:[[:space:]]*//' | head -1)
+
+  # Extract content (everything after "content:" line until end delimiter)
+  content=$(echo "$skill_block" | sed -n '/^content:/,/<<<END_SKILL_CANDIDATE>>>/p' | sed '1d;$d')
+
+  # Validate required fields
+  if [ -z "$category" ]; then
+    echo "  ⚠ Skill candidate missing required field: category"
+    return 1
+  fi
+  if [ -z "$name" ]; then
+    echo "  ⚠ Skill candidate missing required field: name"
+    return 1
+  fi
+  if [ -z "$description" ]; then
+    echo "  ⚠ Skill candidate missing required field: description"
+    return 1
+  fi
+  if [ -z "$content" ]; then
+    echo "  ⚠ Skill candidate missing required field: content"
+    return 1
+  fi
+
+  # Validate category is in allowed list
+  case "$category" in
+    error-resolutions|patterns|workflows)
+      ;;  # Valid category
+    *)
+      echo "  ⚠ Skill candidate has invalid category: $category (must be: error-resolutions, patterns, workflows)"
+      return 1
+      ;;
+  esac
+
+  # Check if skill already exists (no overwrites)
+  local skill_file="$SKILL_DIR/$category/$name.md"
+  if [ -f "$skill_file" ]; then
+    echo "  ⚠ Skill already exists, skipping: $skill_file"
+    return 1
+  fi
+
+  # Create category directory if needed
+  mkdir -p "$SKILL_DIR/$category"
+
+  # Get project name from prd.json
+  local project_name
+  project_name=$(jq -r '.project // "Unknown"' "$PRD_FILE" 2>/dev/null || echo "Unknown")
+
+  # Write skill file with YAML frontmatter
+  cat > "$skill_file" << EOF
+---
+name: $name
+description: $description
+---
+
+$content
+
+## Origin
+
+- Extracted: $(date -Iseconds)
+- Project: $project_name
+- Story: $story_id
+EOF
+
+  echo "✓ Extracted skill: $category/$name.md"
+  return 0
 }
 
 # Initialize transcript directory and index
@@ -254,8 +348,9 @@ EOF
   FAILURE_REASON=""
 
   # Check if any verification exists (XML format or checkmark format)
-  HAS_XML_VERIFICATION=$(echo "$OUTPUT" | grep -c "<verification>" || echo "0")
-  HAS_CHECKMARK_VERIFICATION=$(echo "$OUTPUT" | grep -c "✅" || echo "0")
+  # Note: grep -c outputs "0" AND exits 1 when no matches, so fallback must be outside $()
+  HAS_XML_VERIFICATION=$(echo "$OUTPUT" | grep -c "<verification>") || HAS_XML_VERIFICATION=0
+  HAS_CHECKMARK_VERIFICATION=$(echo "$OUTPUT" | grep -c "✅") || HAS_CHECKMARK_VERIFICATION=0
 
   if [ "$HAS_XML_VERIFICATION" -eq 0 ] && [ "$HAS_CHECKMARK_VERIFICATION" -eq 0 ]; then
     VERIFICATION_FAILED=true
@@ -296,6 +391,9 @@ EOF
 
   # Record successful iteration metrics
   record_metrics "success" "$STORY_ID" ""
+
+  # Extract skill candidates from iteration output (failures don't break loop)
+  write_skill_candidate "$OUTPUT" "$STORY_ID" || true
 
   # Check for completion signal
   if echo "$OUTPUT" | grep -q "<promise>COMPLETE</promise>"; then
