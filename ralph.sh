@@ -117,7 +117,7 @@ record_metrics() {
   # Use awk instead of bc (bc may not be installed)
   lines_changed=$(git diff --stat HEAD~1 2>/dev/null | tail -1 | awk '{ins=$1; del=$4; total=(ins+0)+(del+0); print (total>0 ? total : 0)}')
   lines_changed=${lines_changed:-0}
-  files_changed=$(git diff --stat HEAD~1 2>/dev/null | grep -c '|' 2>/dev/null || echo "0")
+  files_changed=$(git diff --stat HEAD~1 2>/dev/null | grep -c '|' 2>/dev/null) || files_changed=0
 
   # Estimate tokens from transcript word count (words × 1.3)
   # Use bash arithmetic instead of bc: (words * 13) / 10
@@ -348,8 +348,9 @@ EOF
   FAILURE_REASON=""
 
   # Check if any verification exists (XML format or checkmark format)
-  HAS_XML_VERIFICATION=$(echo "$OUTPUT" | grep -c "<verification>" || echo "0")
-  HAS_CHECKMARK_VERIFICATION=$(echo "$OUTPUT" | grep -c "✅" || echo "0")
+  # Note: grep -c outputs "0" AND exits 1 when no matches, so fallback must be outside $()
+  HAS_XML_VERIFICATION=$(echo "$OUTPUT" | grep -c "<verification>") || HAS_XML_VERIFICATION=0
+  HAS_CHECKMARK_VERIFICATION=$(echo "$OUTPUT" | grep -c "✅") || HAS_CHECKMARK_VERIFICATION=0
 
   if [ "$HAS_XML_VERIFICATION" -eq 0 ] && [ "$HAS_CHECKMARK_VERIFICATION" -eq 0 ]; then
     VERIFICATION_FAILED=true
