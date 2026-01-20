@@ -114,16 +114,25 @@ install_angainor() {
     download_file "prompt.md" "$ANGAINOR_DIR/prompt.md"
     log_success "Downloaded prompt.md"
 
-    # Skills
+    # Skills - install to both local .angainor/skills/ and global ~/.claude/skills/
     log_info "Downloading skills..."
+    local GLOBAL_SKILLS_DIR="$HOME/.claude/skills"
+    mkdir -p "$GLOBAL_SKILLS_DIR/prd" "$GLOBAL_SKILLS_DIR/angainor" "$GLOBAL_SKILLS_DIR/read-transcript"
+
+    # prd skill
     download_file "skills/prd/SKILL.md" "$ANGAINOR_DIR/skills/prd/SKILL.md"
-    log_success "Downloaded skills/prd/SKILL.md"
+    cp "$ANGAINOR_DIR/skills/prd/SKILL.md" "$GLOBAL_SKILLS_DIR/prd/SKILL.md"
+    log_success "Installed skills/prd (local + global)"
 
+    # angainor skill
     download_file "skills/angainor/SKILL.md" "$ANGAINOR_DIR/skills/angainor/SKILL.md"
-    log_success "Downloaded skills/angainor/SKILL.md"
+    cp "$ANGAINOR_DIR/skills/angainor/SKILL.md" "$GLOBAL_SKILLS_DIR/angainor/SKILL.md"
+    log_success "Installed skills/angainor (local + global)"
 
+    # read-transcript skill
     download_file "skills/read-transcript/SKILL.md" "$ANGAINOR_DIR/skills/read-transcript/SKILL.md"
-    log_success "Downloaded skills/read-transcript/SKILL.md"
+    cp "$ANGAINOR_DIR/skills/read-transcript/SKILL.md" "$GLOBAL_SKILLS_DIR/read-transcript/SKILL.md"
+    log_success "Installed skills/read-transcript (local + global)"
 
     # Utility scripts
     log_info "Downloading utility scripts..."
@@ -216,22 +225,8 @@ WRAPPER_EOF
     fi
     log_success "Updated .gitignore"
 
-    # Configure Claude Code skills path
-    log_info "Configuring Claude Code skills..."
-    local claude_settings_dir="$TARGET_DIR/.claude"
-    mkdir -p "$claude_settings_dir"
-
-    local settings_file="$claude_settings_dir/settings.json"
-    if [ -f "$settings_file" ]; then
-        # Add skills path to existing settings
-        local tmp_file
-        tmp_file=$(mktemp)
-        jq --arg path ".angainor/skills" '.skills = (.skills // []) | .skills += [$path] | .skills |= unique' "$settings_file" > "$tmp_file" && mv "$tmp_file" "$settings_file"
-    else
-        # Create new settings file
-        echo '{"skills": [".angainor/skills"]}' | jq '.' > "$settings_file"
-    fi
-    log_success "Configured skills path in .claude/settings.json"
+    # Note: Skills are installed globally to ~/.claude/skills/ for Claude Code discovery
+    log_success "Skills installed globally to ~/.claude/skills/"
 
     # Print success message
     echo ""
@@ -243,10 +238,12 @@ WRAPPER_EOF
     echo "  $TARGET_DIR/angainor.sh          - Main entry point"
     echo "  $ANGAINOR_DIR/                   - Angainor internals"
     echo "  $ANGAINOR_DIR/prd.json.example   - PRD format reference"
+    echo "  ~/.claude/skills/{prd,angainor,read-transcript}/ - Global skills"
     echo ""
     echo -e "${YELLOW}Next steps:${NC}"
-    echo "  1. Create your prd.json (use /prd skill or copy from prd.json.example)"
-    echo "  2. Run: ./angainor.sh [max_iterations]"
+    echo "  1. Restart Claude Code to load new skills (exit and run 'claude' again)"
+    echo "  2. Create your prd.json (use /prd skill or copy from prd.json.example)"
+    echo "  3. Run: ./angainor.sh [max_iterations]"
     echo ""
     echo -e "${BLUE}Skills available:${NC}"
     echo "  /prd      - Generate a PRD from feature description"
