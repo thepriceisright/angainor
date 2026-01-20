@@ -440,7 +440,9 @@ EOF
      "$TRANSCRIPT_INDEX" > "$TRANSCRIPT_INDEX.tmp" && mv "$TRANSCRIPT_INDEX.tmp" "$TRANSCRIPT_INDEX"
 
   # Check for completion signal FIRST - if all stories are done, no verification needed
-  if echo "$OUTPUT" | grep -q "<promise>COMPLETE</promise>"; then
+  # Use anchored grep to avoid false positives when Claude mentions the tag in prose
+  # (e.g., "I will not output <promise>COMPLETE</promise>")
+  if echo "$OUTPUT" | grep -qE "^[[:space:]]*<promise>COMPLETE</promise>[[:space:]]*$"; then
     echo ""
     echo "Angainor completed all tasks!"
     echo "Completed at iteration $i of $MAX_ITERATIONS"
