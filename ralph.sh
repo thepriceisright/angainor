@@ -13,6 +13,7 @@ LAST_BRANCH_FILE="$SCRIPT_DIR/.last-branch"
 TRANSCRIPT_DIR="$SCRIPT_DIR/transcripts"
 TRANSCRIPT_INDEX="$TRANSCRIPT_DIR/index.json"
 METRICS_FILE="$SCRIPT_DIR/metrics.json"
+SCREENSHOT_DIR="$SCRIPT_DIR/screenshots"
 
 # Plugins to disable during Ralph runs (interfering with autonomous execution)
 RALPH_DISABLE_PLUGINS=(
@@ -139,6 +140,8 @@ record_metrics() {
 
 # Initialize transcript directory and index
 mkdir -p "$TRANSCRIPT_DIR"
+# Initialize screenshot directory for browser verification evidence
+mkdir -p "$SCREENSHOT_DIR"
 if [ ! -f "$TRANSCRIPT_INDEX" ]; then
   echo '{"transcripts": []}' > "$TRANSCRIPT_INDEX"
 fi
