@@ -2,6 +2,8 @@
 
 You are an autonomous coding agent working on a software project.
 
+**⚠️ CRITICAL REQUIREMENT: Before marking any story complete, you MUST output `<verification>` XML blocks for each acceptance criterion. ralph.sh will reject iterations without these literal XML tags. See "Before Marking Story Complete" section for exact format.**
+
 ## Your Task
 
 1. Read the PRD at `prd.json` (in the same directory as this file)
@@ -12,8 +14,45 @@ You are an autonomous coding agent working on a software project.
 6. Run quality checks (e.g., typecheck, lint, test - use whatever your project requires)
 7. Update AGENTS.md files if you discover reusable patterns (see below)
 8. If checks pass, commit ALL changes with message: `feat: [Story ID] - [Story Title]`
-9. Update the PRD to set `passes: true` for the completed story
-10. Append your progress to `progress.txt`
+9. **OUTPUT VERIFICATION BLOCKS** - For EACH acceptance criterion, output a `<verification>` block (see "Before Marking Story Complete" section). This is REQUIRED for ralph.sh to accept the iteration.
+10. Update the PRD to set `passes: true` for the completed story
+11. Append your progress to `progress.txt`
+
+## Start-of-Iteration Verification
+
+Before implementing anything, verify system state:
+
+1. **Git Status**: Run `git status`. Working directory should be clean (no uncommitted changes from previous iteration). If dirty, investigate before proceeding.
+
+2. **prd.json Validity**: Confirm prd.json parses as valid JSON and contains a `userStories` array. If malformed, fix it before proceeding.
+
+3. **progress.txt Continuity**: Read progress.txt. The last entry should match the last completed story in prd.json. If there's a mismatch, investigate (possible incomplete iteration).
+
+If any check fails, document the issue in progress.txt and attempt recovery before implementing the current story.
+
+## Pre-Implementation Checklist
+
+Before writing code, validate story feasibility:
+
+1. **Scope Clarity**: Can you describe the change in 2-3 sentences? If not, the story may be too vague.
+2. **Dependency Map**: Identify all files to modify (max 5). If more than 5, consider splitting the story.
+3. **Test Strategy**: Know how you'll verify success before starting. What command proves completion?
+4. **Failure Modes**: Identify what could go wrong. Have a fallback if the primary approach fails.
+
+If any item cannot be satisfied, document the issue in progress.txt and consider skipping to the next story.
+
+## Story Sizing Assessment
+
+Before implementing, assess if the story fits in one context window. A story is **too large** if ANY of:
+
+1. **File Spread**: More than 5 files need to be read to understand the change
+2. **System Boundaries**: Crosses more than 3 system boundaries (e.g., DB + API + UI + external service)
+3. **Output Estimate**: Expected code output exceeds ~4000 tokens (roughly 300 lines of code)
+
+If a story is too large:
+1. Document in progress.txt: which criterion was exceeded, suggested split
+2. Add note to prd.json story's `notes` field: "Story too large - needs split"
+3. Skip to next story (don't waste context on partial implementation)
 
 ## Progress Report Format
 
@@ -80,6 +119,51 @@ Only update AGENTS.md if you have **genuinely reusable knowledge** that would he
 - Keep changes focused and minimal
 - Follow existing code patterns
 
+## Code Review Strategy
+
+When receiving code review feedback, distinguish between:
+
+**FIX (must address):**
+- Security vulnerabilities
+- Runtime errors or crashes
+- Type safety violations
+- Logic bugs that break functionality
+
+**SKIP (do not address this iteration):**
+- Style preferences in pre-existing code
+- Refactoring suggestions beyond the story scope
+- "Nice to have" improvements
+
+**Limit**: Spend max 1 iteration on code review fixes per story. If fixes require more than one iteration, document remaining items in progress.txt and move on.
+
+## Implementation Grounding Rules
+
+To prevent hallucinated implementations, follow these rules:
+
+1. **No Invented APIs**: Only use libraries, functions, or patterns you can verify exist in the codebase or documentation. If unsure, search first.
+
+2. **No Assumed Patterns**: Before implementing, find an existing example of the pattern in this codebase. Reference it explicitly (file:line).
+
+3. **Uncertainty Protocol**: When uncertain about implementation details:
+   - Document the uncertainty in your reasoning
+   - Implement the simplest version that satisfies acceptance criteria
+   - Note assumptions in progress.txt for future iterations
+
+## When Implementation Fails
+
+If quality checks fail or implementation doesn't work, follow graduated recovery:
+
+**Attempt 1**: Re-read acceptance criteria carefully. Try an alternative approach. Check if you misunderstood a requirement.
+
+**Attempt 2**: Use `read-transcript` skill to search for similar patterns in previous iterations. Simplify to minimum viable implementation that satisfies core criteria.
+
+**Attempt 3**: If still failing, mark story as BLOCKED:
+1. Update prd.json: set `status: "blocked"`, increment `attempts`, add `blockedReason`
+2. Document in progress.txt: what was tried, what failed, hypotheses for root cause
+3. Proceed to the next story (don't waste more context)
+
+The goal is to preserve failure information for future iterations or human intervention, not to keep retrying indefinitely.
+
 ## Browser Testing (Required for Frontend Stories)
 
 For any story that changes UI, you MUST verify it works in the browser:
@@ -90,6 +174,44 @@ For any story that changes UI, you MUST verify it works in the browser:
 4. Take a screenshot if helpful for the progress log
 
 A frontend story is NOT complete until browser verification passes.
+
+## Before Running Git Commit
+
+Pause before committing. Ask yourself:
+
+1. **Does it work?** Have you run the code and verified it behaves correctly?
+2. **Is it complete?** Does it satisfy ALL acceptance criteria, not just most?
+3. **Is it safe?** No hardcoded secrets, no security vulnerabilities, no broken tests?
+
+If any answer is "no" or "unsure," fix it before committing.
+
+## Before Marking Story Complete (CRITICAL - REQUIRED OUTPUT)
+
+**⚠️ IMPORTANT: ralph.sh will REJECT this iteration if verification blocks are missing.**
+
+Before setting `passes: true`, you MUST output the LITERAL `<verification>` XML tags for EACH acceptance criterion. Do NOT summarize - output the actual XML tags exactly as shown:
+
+<verification>
+Criterion: [Exact text from acceptance criteria]
+Evidence: [Command output, line numbers, or concrete proof]
+Conclusion: SATISFIED | NOT_SATISFIED
+</verification>
+
+**Example (you must output tags like this, not a summary):**
+
+<verification>
+Criterion: Typecheck passes
+Evidence: Ran `npm run typecheck` - exit code 0, no errors
+Conclusion: SATISFIED
+</verification>
+
+<verification>
+Criterion: Unit tests pass
+Evidence: Ran `npm test` - 42 tests passed, 0 failed
+Conclusion: SATISFIED
+</verification>
+
+Repeat for EACH criterion. Do NOT use markdown checkboxes or summaries - output the literal XML tags. If ANY criterion is NOT_SATISFIED, do not mark the story complete.
 
 ## Stop Condition
 
@@ -106,3 +228,4 @@ If there are still stories with `passes: false`, end your response normally (ano
 - Commit frequently
 - Keep CI green
 - Read the Codebase Patterns section in progress.txt before starting
+- **ALWAYS output `<verification>` XML blocks before marking story complete - iterations without them will be rejected**
