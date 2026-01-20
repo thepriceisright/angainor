@@ -48,9 +48,26 @@ restore_plugins() {
   done
 }
 
+# Track last response for error reporting
+LAST_CLAUDE_OUTPUT=""
+LAST_ITERATION=0
+
 # Trap handler for cleanup on exit (normal, error, or interrupt)
 cleanup_on_exit() {
   local exit_code=$?
+
+  # If exiting with error and we have a last response, print it
+  if [ "$exit_code" -ne 0 ] && [ -n "$LAST_CLAUDE_OUTPUT" ]; then
+    echo ""
+    echo "═══════════════════════════════════════════════════════"
+    echo "  UNEXPECTED EXIT (code $exit_code) at iteration $LAST_ITERATION"
+    echo "═══════════════════════════════════════════════════════"
+    echo "Last Claude response (last 100 lines):"
+    echo "───────────────────────────────────────────────────────"
+    echo "$LAST_CLAUDE_OUTPUT" | tail -100
+    echo "───────────────────────────────────────────────────────"
+  fi
+
   restore_plugins
   exit $exit_code
 }
@@ -312,8 +329,71 @@ for i in $(seq 1 $MAX_ITERATIONS); do
   TIMESTAMP=$(date +%Y-%m-%d-%H-%M-%S)
   TRANSCRIPT_FILE="$TRANSCRIPT_DIR/$TIMESTAMP-iteration-$i.txt"
 
-  # Run Claude with the ralph prompt, capturing to transcript
-  OUTPUT=$(claude --dangerously-skip-permissions --print < "$SCRIPT_DIR/prompt.md" 2>&1 | tee /dev/stderr "$TRANSCRIPT_FILE") || true
+  # Run Claude with retry logic for transient API errors
+  MAX_RETRIES=3
+  RETRY_DELAY=5
+  CLAUDE_SUCCESS=false
+
+  for retry in $(seq 1 $MAX_RETRIES); do
+    echo "  Calling Claude API (attempt $retry/$MAX_RETRIES)..."
+
+    # Run Claude with the ralph prompt, capturing to transcript
+    OUTPUT=$(claude --dangerously-skip-permissions --print < "$SCRIPT_DIR/prompt.md" 2>&1 | tee /dev/stderr "$TRANSCRIPT_FILE") || true
+    CLAUDE_EXIT_CODE=$?
+
+    # Check for transient API errors
+    if echo "$OUTPUT" | grep -qE "No messages returned|ECONNRESET|ETIMEDOUT|rate limit|503|502|504"; then
+      echo ""
+      echo "  ⚠ Transient API error detected (attempt $retry/$MAX_RETRIES)"
+      if [ "$retry" -lt "$MAX_RETRIES" ]; then
+        echo "  Retrying in ${RETRY_DELAY}s..."
+        sleep "$RETRY_DELAY"
+        RETRY_DELAY=$((RETRY_DELAY * 2))  # Exponential backoff
+        continue
+      else
+        echo "  ✗ Max retries exceeded. Saving error response."
+        echo ""
+        echo "═══════════════════════════════════════════════════════"
+        echo "  CLAUDE API ERROR - Last Response:"
+        echo "═══════════════════════════════════════════════════════"
+        echo "$OUTPUT" | tail -50
+        echo "═══════════════════════════════════════════════════════"
+        record_metrics "failed" "API_ERROR" "Transient API error after $MAX_RETRIES retries"
+        # Continue to next iteration instead of halting
+        continue 2
+      fi
+    fi
+
+    # Check for empty response
+    if [ -z "$OUTPUT" ] || [ ${#OUTPUT} -lt 50 ]; then
+      echo ""
+      echo "  ⚠ Empty or minimal response (attempt $retry/$MAX_RETRIES)"
+      if [ "$retry" -lt "$MAX_RETRIES" ]; then
+        echo "  Retrying in ${RETRY_DELAY}s..."
+        sleep "$RETRY_DELAY"
+        RETRY_DELAY=$((RETRY_DELAY * 2))
+        continue
+      else
+        echo "  ✗ Max retries exceeded for empty response."
+        record_metrics "failed" "EMPTY_RESPONSE" "Empty response after $MAX_RETRIES retries"
+        continue 2
+      fi
+    fi
+
+    # Success - break out of retry loop
+    CLAUDE_SUCCESS=true
+    break
+  done
+
+  if [ "$CLAUDE_SUCCESS" != "true" ]; then
+    echo "Iteration $i failed due to API issues. Continuing to next iteration..."
+    sleep 2
+    continue
+  fi
+
+  # Track last successful response for error reporting
+  LAST_CLAUDE_OUTPUT="$OUTPUT"
+  LAST_ITERATION="$i"
 
   # Append metadata to transcript
   CURRENT_BRANCH=$(jq -r '.branchName // empty' "$PRD_FILE" 2>/dev/null || echo "unknown")
