@@ -342,6 +342,16 @@ EOF
      '.transcripts += [{"file": $file, "timestamp": $ts, "iteration": ($iter|tonumber), "branch": $branch, "storyId": $story}]' \
      "$TRANSCRIPT_INDEX" > "$TRANSCRIPT_INDEX.tmp" && mv "$TRANSCRIPT_INDEX.tmp" "$TRANSCRIPT_INDEX"
 
+  # Check for completion signal FIRST - if all stories are done, no verification needed
+  if echo "$OUTPUT" | grep -q "<promise>COMPLETE</promise>"; then
+    echo ""
+    echo "Ralph completed all tasks!"
+    echo "Completed at iteration $i of $MAX_ITERATIONS"
+    record_metrics "success" "COMPLETE" ""
+    print_metrics_summary
+    exit 0
+  fi
+
   # Verify that verification was provided (enforcement of US-003 requirement)
   # Accept either <verification> XML blocks OR ✅ checkmarks as valid verification
   VERIFICATION_FAILED=false
@@ -394,15 +404,6 @@ EOF
 
   # Extract skill candidates from iteration output (failures don't break loop)
   write_skill_candidate "$OUTPUT" "$STORY_ID" || true
-
-  # Check for completion signal
-  if echo "$OUTPUT" | grep -q "<promise>COMPLETE</promise>"; then
-    echo ""
-    echo "Ralph completed all tasks!"
-    echo "Completed at iteration $i of $MAX_ITERATIONS"
-    print_metrics_summary
-    exit 0
-  fi
 
   echo "Iteration $i complete. Continuing..."
   sleep 2
