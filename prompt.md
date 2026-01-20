@@ -14,11 +14,22 @@ You are an autonomous coding agent working on a software project.
 6. Run quality checks (e.g., typecheck, lint, test - use whatever your project requires)
 7. Update AGENTS.md files if you discover reusable patterns (see below)
 8. If checks pass, commit ALL changes with message: `feat: [Story ID] - [Story Title]`
-9. **⛔ STOP - OUTPUT VERIFICATION BLOCKS NOW** - For EACH acceptance criterion, output a literal `<verification>` XML block. DO NOT proceed to step 10 until you have output these blocks. ralph.sh will REJECT the iteration without them.
+9. **⛔ STOP AND OUTPUT VERIFICATION BLOCKS NOW** - For EACH acceptance criterion, output this EXACT format:
+
+```
+<verification>
+Criterion: [Copy exact text from acceptance criteria]
+Evidence: [What you ran/checked and the result]
+Conclusion: SATISFIED
+</verification>
+```
+
+Output one block per criterion. ralph.sh searches for literal `<verification>` tags - if missing, iteration is REJECTED.
+
 10. Update the PRD to set `passes: true` for the completed story
 11. Append your progress to `progress.txt`
 
-**🚨 VERIFICATION IS NOT OPTIONAL** - If you skip step 9, the iteration will be rejected and you will have wasted context. Output the `<verification>` blocks BEFORE updating prd.json.
+**🚨 DO NOT WRITE "## Summary" - instead output the `<verification>` blocks above. Summaries don't count.**
 
 ## Start-of-Iteration Verification
 
