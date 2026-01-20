@@ -175,6 +175,30 @@ For any story that changes UI, you MUST verify it works in the browser:
 
 A frontend story is NOT complete until browser verification passes.
 
+## Browser Verification (Headless)
+
+For autonomous runs, use headless Playwright when acceptance criteria includes "Verify in browser":
+
+1. **Detection**: Look for "Verify in browser" or similar UI verification criteria
+2. **Execute**: Use `browser_snapshot` tool to capture accessibility snapshot, or `browser_take_screenshot` for visual evidence
+3. **Screenshot Path**: Save to `screenshots/[story-id].png` (e.g., `screenshots/US-004.png`)
+4. **Verify Elements**: Check that expected elements appear in snapshot or screenshot
+
+**Failure Handling:**
+- **Attempt 1**: If verification fails, wait 2 seconds and retry
+- **Attempt 2**: If still failing, mark story as BLOCKED with `blockedReason: "Browser verification failed: [specific error]"`
+
+**Verification Evidence Format:**
+```
+<verification>
+Criterion: Verify in browser - login form displays correctly
+Evidence: Screenshot saved to screenshots/US-004.png; snapshot shows: textbox "Email", textbox "Password", button "Sign In"
+Conclusion: SATISFIED
+</verification>
+```
+
+Prefer `browser_snapshot` for element detection; use `browser_take_screenshot` when visual appearance matters.
+
 ## Before Running Git Commit
 
 Pause before committing. Ask yourself:
