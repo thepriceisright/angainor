@@ -83,6 +83,25 @@ When all stories have `passes: true`, output: `<promise>COMPLETE</promise>`
 ### Verification Enforcement
 ralph.sh enforces that each iteration includes `<verification>` blocks before accepting story completion. If blocks are missing or contain `NOT_SATISFIED`, the iteration fails and doesn't count toward completion.
 
+Flexible verification: ralph.sh accepts either `<verification>` XML blocks OR ✅ checkmarks as valid verification evidence.
+
+### Ralph Profile
+ralph.sh configures a minimal plugin environment for autonomous runs:
+
+**Disabled plugins** (restored on exit):
+- `automatic-code-review@claude-skillz` - Interferes with autonomous iteration flow
+- `explanatory-output-style@claude-plugins-official` - Adds unnecessary verbosity
+
+**Plugin lifecycle:**
+- `configure_ralph_profile()` disables plugins at startup
+- `restore_plugins()` re-enables on exit (normal, Ctrl+C, or error)
+- Missing plugins are handled gracefully (no errors)
+
+**Minimum plugin set** (what remains enabled):
+- Core: Essential Claude Code functionality
+- Testing: Framework detection, test runners
+- Domain: Project-specific skills (prd, ralph, read-transcript)
+
 ### Metrics Output
 ralph.sh writes iteration metrics to `metrics.json` in the script directory:
 ```json
