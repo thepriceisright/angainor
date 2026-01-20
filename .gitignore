@@ -3,6 +3,7 @@ prd.json
 progress.txt
 .last-branch
 transcripts/
+screenshots/
 
 # Archive is optional to commit
 # archive/

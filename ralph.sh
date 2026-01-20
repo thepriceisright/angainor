@@ -13,6 +13,51 @@ LAST_BRANCH_FILE="$SCRIPT_DIR/.last-branch"
 TRANSCRIPT_DIR="$SCRIPT_DIR/transcripts"
 TRANSCRIPT_INDEX="$TRANSCRIPT_DIR/index.json"
 METRICS_FILE="$SCRIPT_DIR/metrics.json"
+SCREENSHOT_DIR="$SCRIPT_DIR/screenshots"
+
+# Plugins to disable during Ralph runs (interfering with autonomous execution)
+RALPH_DISABLE_PLUGINS=(
+  "automatic-code-review@claude-skillz"
+  "explanatory-output-style@claude-plugins-official"
+)
+
+# Configure Ralph profile by disabling interfering plugins
+configure_ralph_profile() {
+  echo "Configuring Ralph profile (disabling interfering plugins)..."
+  for plugin in "${RALPH_DISABLE_PLUGINS[@]}"; do
+    if claude plugin disable "$plugin" 2>/dev/null; then
+      echo "  Disabled: $plugin"
+    else
+      # Plugin might not be installed - that's fine
+      echo "  Skipped (not installed): $plugin"
+    fi
+  done
+}
+
+# Restore plugins to their original state
+restore_plugins() {
+  echo "Restoring plugins..."
+  for plugin in "${RALPH_DISABLE_PLUGINS[@]}"; do
+    if claude plugin enable "$plugin" 2>/dev/null; then
+      echo "  Enabled: $plugin"
+    else
+      # Plugin might not be installed - that's fine
+      echo "  Skipped (not installed): $plugin"
+    fi
+  done
+}
+
+# Trap handler for cleanup on exit (normal, error, or interrupt)
+cleanup_on_exit() {
+  local exit_code=$?
+  restore_plugins
+  exit $exit_code
+}
+
+# Register cleanup traps - EXIT covers normal exit and set -e failures
+# SIGINT covers Ctrl+C interrupts
+trap cleanup_on_exit EXIT
+trap 'trap - EXIT; cleanup_on_exit' INT
 
 # Print metrics summary on loop completion
 print_metrics_summary() {
@@ -95,6 +140,8 @@ record_metrics() {
 
 # Initialize transcript directory and index
 mkdir -p "$TRANSCRIPT_DIR"
+# Initialize screenshot directory for browser verification evidence
+mkdir -p "$SCREENSHOT_DIR"
 if [ ! -f "$TRANSCRIPT_INDEX" ]; then
   echo '{"transcripts": []}' > "$TRANSCRIPT_INDEX"
 fi
@@ -152,6 +199,9 @@ if [ ! -f "$PROGRESS_FILE" ]; then
   echo "Started: $(date)" >> "$PROGRESS_FILE"
   echo "---" >> "$PROGRESS_FILE"
 fi
+
+# Configure Ralph profile (disable interfering plugins) before main loop
+configure_ralph_profile
 
 echo "Starting Ralph - Max iterations: $MAX_ITERATIONS"
 

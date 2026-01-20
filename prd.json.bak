@@ -1,0 +1,110 @@
+{
+  "project": "RalphProfile",
+  "branchName": "ralph/ralph-profile",
+  "description": "Ralph Profile - Configure minimal plugin set for autonomous runs, integrate headless browser testing for UI verification, and document test coverage patterns",
+  "userStories": [
+    {
+      "id": "US-001",
+      "title": "Add Plugin Management Functions to ralph.sh",
+      "description": "As a Ralph operator, I want ralph.sh to manage plugin state so that interfering plugins are disabled during autonomous runs.",
+      "acceptanceCriteria": [
+        "Add RALPH_DISABLE_PLUGINS array with plugins: automatic-code-review@claude-skillz, explanatory-output-style@claude-plugins-official",
+        "Add configure_ralph_profile() function that disables each plugin via 'claude plugin disable'",
+        "Add restore_plugins() function that re-enables each plugin via 'claude plugin enable'",
+        "Functions handle missing plugins gracefully (no errors if plugin not installed)",
+        "Script passes shellcheck"
+      ],
+      "priority": 1,
+      "passes": true,
+      "status": "passed",
+      "attempts": 1,
+      "notes": ""
+    },
+    {
+      "id": "US-002",
+      "title": "Add Plugin Restore on Exit to ralph.sh",
+      "description": "As a Ralph operator, I want plugins restored when Ralph exits so that my normal Claude Code environment is preserved.",
+      "acceptanceCriteria": [
+        "trap restore_plugins EXIT ensures cleanup on normal exit",
+        "Plugins restored on Ctrl+C interrupt (SIGINT)",
+        "Plugins restored on script error (set -e failure)",
+        "configure_ralph_profile called at script start before main loop",
+        "Script passes shellcheck"
+      ],
+      "priority": 2,
+      "passes": true,
+      "status": "passed",
+      "attempts": 1,
+      "notes": "Depends on US-001 (plugin management functions must exist)"
+    },
+    {
+      "id": "US-003",
+      "title": "Add Screenshot Directory Setup to ralph.sh",
+      "description": "As a Ralph operator, I want a screenshots directory so that browser verification evidence is captured.",
+      "acceptanceCriteria": [
+        "Add SCREENSHOT_DIR=\"$SCRIPT_DIR/screenshots\" variable",
+        "Create directory with 'mkdir -p \"$SCREENSHOT_DIR\"' at startup",
+        "Add screenshots/ to .gitignore (or verify already gitignored)",
+        "Script passes shellcheck"
+      ],
+      "priority": 3,
+      "passes": true,
+      "status": "passed",
+      "attempts": 1,
+      "notes": ""
+    },
+    {
+      "id": "US-004",
+      "title": "Add Browser Verification Section to prompt.md",
+      "description": "As a Ralph agent, I need instructions for headless browser testing so that I can verify UI stories autonomously.",
+      "acceptanceCriteria": [
+        "Add 'Browser Verification (Headless)' section to prompt.md",
+        "Instructions cover: detecting 'Verify in browser' criteria, running headless Playwright, capturing screenshots",
+        "Screenshot path format: screenshots/[story-id].png",
+        "Failure handling: 2 attempts, then mark story as BLOCKED with reason",
+        "Verification evidence format documented with example",
+        "Section is under 30 lines"
+      ],
+      "priority": 4,
+      "passes": true,
+      "status": "passed",
+      "attempts": 1,
+      "notes": "Depends on US-003 (screenshot directory must exist)"
+    },
+    {
+      "id": "US-005",
+      "title": "Add Test Stories Section to prompt.md",
+      "description": "As a Ralph agent, I need instructions for implementing test stories so that I can write unit tests when PRDs include them.",
+      "acceptanceCriteria": [
+        "Add 'Test Stories' section to prompt.md",
+        "Instructions cover: detecting test framework (vitest/jest), mocking external dependencies, test file placement",
+        "Test file naming convention: foo.ts -> foo.test.ts",
+        "Verification must include test command output",
+        "Section is under 20 lines"
+      ],
+      "priority": 5,
+      "passes": true,
+      "status": "passed",
+      "attempts": 1,
+      "notes": ""
+    },
+    {
+      "id": "US-006",
+      "title": "Document Ralph Profile in CLAUDE.md",
+      "description": "As a developer working on Ralph, I want CLAUDE.md to document the Ralph Profile so that the behavior is understood.",
+      "acceptanceCriteria": [
+        "Add 'Ralph Profile' subsection under appropriate section",
+        "Document which plugins are disabled and why",
+        "Document plugin restore behavior on exit",
+        "Document minimum plugin set (Core, Testing, Domain categories)",
+        "Document the flexible verification check (accepts <verification> OR checkmark)",
+        "Keep additions under 25 lines"
+      ],
+      "priority": 6,
+      "passes": true,
+      "status": "passed",
+      "attempts": 1,
+      "notes": "Should be done last as it documents all other changes"
+    }
+  ]
+}

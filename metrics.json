@@ -1,0 +1,64 @@
+{
+  "iterations": [
+    {
+      "timestamp": "2026-01-20-10-33-33",
+      "duration_seconds": 126,
+      "story_id": "US-001",
+      "status": "success",
+      "lines_changed": 33,
+      "files_changed": 1,
+      "estimated_tokens": 37,
+      "failure_reason": ""
+    },
+    {
+      "timestamp": "2026-01-20-10-35-41",
+      "duration_seconds": 144,
+      "story_id": "US-002",
+      "status": "success",
+      "lines_changed": 16,
+      "files_changed": 1,
+      "estimated_tokens": 37,
+      "failure_reason": ""
+    },
+    {
+      "timestamp": "2026-01-20-10-38-07",
+      "duration_seconds": 129,
+      "story_id": "US-003",
+      "status": "success",
+      "lines_changed": 6,
+      "files_changed": 2,
+      "estimated_tokens": 104,
+      "failure_reason": ""
+    },
+    {
+      "timestamp": "2026-01-20-10-40-18",
+      "duration_seconds": 137,
+      "story_id": "US-004",
+      "status": "success",
+      "lines_changed": 25,
+      "files_changed": 1,
+      "estimated_tokens": 135,
+      "failure_reason": ""
+    },
+    {
+      "timestamp": "2026-01-20-10-42-37",
+      "duration_seconds": 122,
+      "story_id": "US-005",
+      "status": "success",
+      "lines_changed": 19,
+      "files_changed": 1,
+      "estimated_tokens": 36,
+      "failure_reason": ""
+    },
+    {
+      "timestamp": "2026-01-20-10-44-41",
+      "duration_seconds": 91,
+      "story_id": "",
+      "status": "success",
+      "lines_changed": 20,
+      "files_changed": 1,
+      "estimated_tokens": 20,
+      "failure_reason": ""
+    }
+  ]
+}
