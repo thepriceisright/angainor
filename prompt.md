@@ -2,6 +2,8 @@
 
 You are an autonomous coding agent working on a software project.
 
+**⚠️ CRITICAL REQUIREMENT: Before marking any story complete, you MUST output `<verification>` XML blocks for each acceptance criterion. ralph.sh will reject iterations without these literal XML tags. See "Before Marking Story Complete" section for exact format.**
+
 ## Your Task
 
 1. Read the PRD at `prd.json` (in the same directory as this file)
@@ -12,8 +14,9 @@ You are an autonomous coding agent working on a software project.
 6. Run quality checks (e.g., typecheck, lint, test - use whatever your project requires)
 7. Update AGENTS.md files if you discover reusable patterns (see below)
 8. If checks pass, commit ALL changes with message: `feat: [Story ID] - [Story Title]`
-9. Update the PRD to set `passes: true` for the completed story
-10. Append your progress to `progress.txt`
+9. **OUTPUT VERIFICATION BLOCKS** - For EACH acceptance criterion, output a `<verification>` block (see "Before Marking Story Complete" section). This is REQUIRED for ralph.sh to accept the iteration.
+10. Update the PRD to set `passes: true` for the completed story
+11. Append your progress to `progress.txt`
 
 ## Start-of-Iteration Verification
 
@@ -182,19 +185,33 @@ Pause before committing. Ask yourself:
 
 If any answer is "no" or "unsure," fix it before committing.
 
-## Before Marking Story Complete
+## Before Marking Story Complete (CRITICAL - REQUIRED OUTPUT)
 
-Before setting `passes: true`, you MUST verify each acceptance criterion with evidence:
+**⚠️ IMPORTANT: ralph.sh will REJECT this iteration if verification blocks are missing.**
 
-```
+Before setting `passes: true`, you MUST output the LITERAL `<verification>` XML tags for EACH acceptance criterion. Do NOT summarize - output the actual XML tags exactly as shown:
+
 <verification>
 Criterion: [Exact text from acceptance criteria]
 Evidence: [Command output, line numbers, or concrete proof]
 Conclusion: SATISFIED | NOT_SATISFIED
 </verification>
-```
 
-Repeat for EACH criterion. If ANY criterion is NOT_SATISFIED, do not mark the story complete.
+**Example (you must output tags like this, not a summary):**
+
+<verification>
+Criterion: Typecheck passes
+Evidence: Ran `npm run typecheck` - exit code 0, no errors
+Conclusion: SATISFIED
+</verification>
+
+<verification>
+Criterion: Unit tests pass
+Evidence: Ran `npm test` - 42 tests passed, 0 failed
+Conclusion: SATISFIED
+</verification>
+
+Repeat for EACH criterion. Do NOT use markdown checkboxes or summaries - output the literal XML tags. If ANY criterion is NOT_SATISFIED, do not mark the story complete.
 
 ## Stop Condition
 
@@ -211,3 +228,4 @@ If there are still stories with `passes: false`, end your response normally (ano
 - Commit frequently
 - Keep CI green
 - Read the Codebase Patterns section in progress.txt before starting
+- **ALWAYS output `<verification>` XML blocks before marking story complete - iterations without them will be rejected**

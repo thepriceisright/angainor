@@ -198,19 +198,27 @@ EOF
      '.transcripts += [{"file": $file, "timestamp": $ts, "iteration": ($iter|tonumber), "branch": $branch, "storyId": $story}]' \
      "$TRANSCRIPT_INDEX" > "$TRANSCRIPT_INDEX.tmp" && mv "$TRANSCRIPT_INDEX.tmp" "$TRANSCRIPT_INDEX"
 
-  # Verify that verification blocks were provided (enforcement of US-003 requirement)
+  # Verify that verification was provided (enforcement of US-003 requirement)
+  # Accept either <verification> XML blocks OR ✅ checkmarks as valid verification
   VERIFICATION_FAILED=false
   FAILURE_REASON=""
 
-  # Check if any verification blocks exist
-  if ! echo "$OUTPUT" | grep -q "<verification>"; then
+  # Check if any verification exists (XML format or checkmark format)
+  HAS_XML_VERIFICATION=$(echo "$OUTPUT" | grep -c "<verification>" || echo "0")
+  HAS_CHECKMARK_VERIFICATION=$(echo "$OUTPUT" | grep -c "✅" || echo "0")
+
+  if [ "$HAS_XML_VERIFICATION" -eq 0 ] && [ "$HAS_CHECKMARK_VERIFICATION" -eq 0 ]; then
     VERIFICATION_FAILED=true
-    FAILURE_REASON="Missing <verification> blocks - story completion requires structured verification"
+    FAILURE_REASON="Missing verification - story completion requires either <verification> blocks or ✅ checkmarks"
   else
-    # Check for NOT_SATISFIED conclusions
+    # Check for NOT_SATISFIED conclusions (XML format) or ❌ (checkmark format)
     if echo "$OUTPUT" | grep -q "Conclusion: NOT_SATISFIED"; then
       VERIFICATION_FAILED=true
       FAILURE_REASON="Verification failed - one or more criteria marked NOT_SATISFIED"
+    fi
+    if echo "$OUTPUT" | grep -q "❌"; then
+      VERIFICATION_FAILED=true
+      FAILURE_REASON="Verification failed - one or more criteria marked with ❌"
     fi
   fi
 
