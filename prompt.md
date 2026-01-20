@@ -259,7 +259,23 @@ Evidence: Ran `npm test` - 42 tests passed, 0 failed
 Conclusion: SATISFIED
 </verification>
 
-Repeat for EACH criterion. Do NOT use markdown checkboxes or summaries - output the literal XML tags. If ANY criterion is NOT_SATISFIED, do not mark the story complete.
+Repeat for EACH criterion. If ANY criterion is NOT_SATISFIED, do not mark the story complete.
+
+**❌ WRONG - Do NOT do this:**
+```
+Verification blocks have been output for each acceptance criterion.
+```
+
+**✅ CORRECT - Actually output the XML tags in your response:**
+```
+<verification>
+Criterion: Typecheck passes
+Evidence: Ran `npm run typecheck` - exit code 0
+Conclusion: SATISFIED
+</verification>
+```
+
+The XML tags must appear literally in your response text. Saying "I output them" or "verification blocks have been output" does NOT count - ralph.sh searches for the literal `<verification>` string.
 
 ## Skill Extraction (Claudeception)
 
