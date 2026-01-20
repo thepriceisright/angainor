@@ -332,17 +332,34 @@ for i in $(seq 1 $MAX_ITERATIONS); do
   # Run Claude with retry logic for transient API errors
   MAX_RETRIES=3
   RETRY_DELAY=5
+  CLAUDE_TIMEOUT=600  # 10 minutes per iteration
   CLAUDE_SUCCESS=false
 
   for retry in $(seq 1 $MAX_RETRIES); do
     echo "  Calling Claude API (attempt $retry/$MAX_RETRIES)..."
 
-    # Run Claude with the angainor prompt, capturing to transcript
-    OUTPUT=$(claude --dangerously-skip-permissions --print < "$SCRIPT_DIR/prompt.md" 2>&1 | tee /dev/stderr "$TRANSCRIPT_FILE") || true
+    # Run Claude with timeout protection to prevent hangs on crashed processes
+    OUTPUT=$(timeout --signal=KILL $CLAUDE_TIMEOUT claude --dangerously-skip-permissions --print < "$SCRIPT_DIR/prompt.md" 2>&1 | tee /dev/stderr "$TRANSCRIPT_FILE") || true
     CLAUDE_EXIT_CODE=$?
 
+    # Check for timeout (exit code 137 = killed by SIGKILL after timeout)
+    if [ "$CLAUDE_EXIT_CODE" -eq 137 ] || [ "$CLAUDE_EXIT_CODE" -eq 124 ]; then
+      echo ""
+      echo "  ⚠ Claude process timed out after ${CLAUDE_TIMEOUT}s (attempt $retry/$MAX_RETRIES)"
+      if [ "$retry" -lt "$MAX_RETRIES" ]; then
+        echo "  Retrying in ${RETRY_DELAY}s..."
+        sleep "$RETRY_DELAY"
+        RETRY_DELAY=$((RETRY_DELAY * 2))
+        continue
+      else
+        echo "  ✗ Max retries exceeded due to timeouts."
+        record_metrics "failed" "TIMEOUT" "Process timed out after $MAX_RETRIES retries"
+        continue 2
+      fi
+    fi
+
     # Check for transient API errors
-    if echo "$OUTPUT" | grep -qE "No messages returned|ECONNRESET|ETIMEDOUT|rate limit|503|502|504"; then
+    if echo "$OUTPUT" | grep -qE "No messages returned|ECONNRESET|ETIMEDOUT|rate limit|503|502|504|unhandled.*promise|rejected.*reason"; then
       echo ""
       echo "  ⚠ Transient API error detected (attempt $retry/$MAX_RETRIES)"
       if [ "$retry" -lt "$MAX_RETRIES" ]; then
