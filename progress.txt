@@ -74,3 +74,18 @@ Story: US-005 - Test bash extraction with valid input
   - In bash, avoid `(())` arithmetic with set -e when the value could be 0 (returns non-zero exit); use `VAR=$((VAR + 1))` instead
   - Use shellcheck disable comments for expected false positives: SC2317 (trap functions), SC2034 (eval'd function vars), SC2016 (intentional literal strings)
 ---
+
+## 2026-01-20 - US-006
+Story: US-006 - Test bash extraction edge cases
+- Extended scripts/test-skill-extraction.sh with 4 edge case test functions:
+  - test_missing_block: verifies function returns 0 with no output when no skill block present
+  - test_malformed_block: verifies warnings for missing category, name, description, content, and end delimiter
+  - test_invalid_category: verifies warnings for invalid and typo categories
+  - test_duplicate_skill: verifies warning and no overwrite when skill already exists
+- Added helper assertions: assert_file_not_exists, assert_exit_code, assert_output_empty
+- All 60 assertions pass, shellcheck passes with no errors
+- Files changed: scripts/test-skill-extraction.sh
+- **Learnings for future iterations:**
+  - With `set -e`, capturing exit codes from functions that return non-zero requires `cmd && exit_code=0 || exit_code=$?` pattern
+  - The standard `result=$(cmd); exit_code=$?` pattern causes early script exit with `set -e`
+---

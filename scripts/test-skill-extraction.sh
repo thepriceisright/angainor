@@ -1,6 +1,6 @@
 #!/bin/bash
-# Test script for skill extraction functionality (US-005)
-# Tests valid input scenarios for write_skill_candidate function
+# Test script for skill extraction functionality (US-005, US-006)
+# Tests valid input scenarios and edge cases for write_skill_candidate function
 
 # shellcheck disable=SC2317  # Functions called via trap appear unreachable
 # shellcheck disable=SC2034  # Variables used by eval'd function appear unused
@@ -70,6 +70,51 @@ assert_file_exists() {
   else
     echo -e "${RED}✗${NC} $message"
     echo "  File not found: $file"
+    TEST_FAILED=$((TEST_FAILED + 1))
+  fi
+}
+
+assert_file_not_exists() {
+  local file="$1"
+  local message="$2"
+
+  if [ ! -f "$file" ]; then
+    echo -e "${GREEN}✓${NC} $message"
+    TEST_PASSED=$((TEST_PASSED + 1))
+  else
+    echo -e "${RED}✗${NC} $message"
+    echo "  File should not exist: $file"
+    TEST_FAILED=$((TEST_FAILED + 1))
+  fi
+}
+
+assert_exit_code() {
+  local expected="$1"
+  local actual="$2"
+  local message="$3"
+
+  if [ "$expected" -eq "$actual" ]; then
+    echo -e "${GREEN}✓${NC} $message"
+    TEST_PASSED=$((TEST_PASSED + 1))
+  else
+    echo -e "${RED}✗${NC} $message"
+    echo "  Expected exit code: $expected"
+    echo "  Actual exit code: $actual"
+    TEST_FAILED=$((TEST_FAILED + 1))
+  fi
+}
+
+assert_output_empty() {
+  local output="$1"
+  local message="$2"
+
+  if [ -z "$output" ]; then
+    echo -e "${GREEN}✓${NC} $message"
+    TEST_PASSED=$((TEST_PASSED + 1))
+  else
+    echo -e "${RED}✗${NC} $message"
+    echo "  Expected empty output"
+    echo "  Actual: $output"
     TEST_FAILED=$((TEST_FAILED + 1))
   fi
 }
@@ -384,10 +429,270 @@ Run the following:
 }
 
 # ============================================================
+# EDGE CASE TESTS (US-006)
+# ============================================================
+
+# ============================================================
+# TEST: Missing skill candidate block returns 0, no output
+# ============================================================
+test_missing_block() {
+  echo ""
+  echo "═══════════════════════════════════════════════════════"
+  echo "  TEST: Missing skill candidate block"
+  echo "═══════════════════════════════════════════════════════"
+
+  # Reset test directory
+  rm -rf "$TEST_SKILL_DIR"
+  mkdir -p "$TEST_SKILL_DIR"
+  source_skill_function
+
+  local test_output='This is just regular iteration output.
+No skill candidate block here.
+Just normal text about what was implemented.'
+
+  local result
+  local exit_code
+  result=$(write_skill_candidate "$test_output" "US-NONE" 2>&1)
+  exit_code=$?
+
+  assert_exit_code 0 "$exit_code" \
+    "Function returns 0 when no skill block present"
+  assert_output_empty "$result" \
+    "No output when skill block is missing"
+
+  # Verify no directories were created
+  local dir_count
+  dir_count=$(find "$TEST_SKILL_DIR" -mindepth 1 -type d 2>/dev/null | wc -l)
+  assert_equals "0" "$dir_count" \
+    "No directories created when no skill block"
+}
+
+# ============================================================
+# TEST: Malformed block (missing fields) shows warning
+# ============================================================
+test_malformed_block() {
+  echo ""
+  echo "═══════════════════════════════════════════════════════"
+  echo "  TEST: Malformed block (missing fields)"
+  echo "═══════════════════════════════════════════════════════"
+
+  # Reset test directory
+  rm -rf "$TEST_SKILL_DIR"
+  mkdir -p "$TEST_SKILL_DIR"
+  source_skill_function
+
+  # Test missing category
+  local test_missing_category='<<<SKILL_CANDIDATE>>>
+name: missing-category-skill
+description: Test skill missing category
+content:
+Some content here.
+<<<END_SKILL_CANDIDATE>>>'
+
+  local result
+  local exit_code
+  result=$(write_skill_candidate "$test_missing_category" "US-MALFORMED" 2>&1) && exit_code=0 || exit_code=$?
+
+  assert_equals 1 "$exit_code" \
+    "Returns non-zero when category missing"
+  assert_contains "$result" "missing required field: category" \
+    "Warning message mentions missing category"
+  assert_file_not_exists "$TEST_SKILL_DIR/error-resolutions/missing-category-skill.md" \
+    "No file created when category missing"
+
+  # Test missing name
+  local test_missing_name='<<<SKILL_CANDIDATE>>>
+category: patterns
+description: Test skill missing name
+content:
+Some content here.
+<<<END_SKILL_CANDIDATE>>>'
+
+  result=$(write_skill_candidate "$test_missing_name" "US-MALFORMED" 2>&1) && exit_code=0 || exit_code=$?
+
+  assert_equals 1 "$exit_code" \
+    "Returns non-zero when name missing"
+  assert_contains "$result" "missing required field: name" \
+    "Warning message mentions missing name"
+
+  # Test missing description
+  local test_missing_description='<<<SKILL_CANDIDATE>>>
+category: patterns
+name: missing-description-skill
+content:
+Some content here.
+<<<END_SKILL_CANDIDATE>>>'
+
+  result=$(write_skill_candidate "$test_missing_description" "US-MALFORMED" 2>&1) && exit_code=0 || exit_code=$?
+
+  assert_equals 1 "$exit_code" \
+    "Returns non-zero when description missing"
+  assert_contains "$result" "missing required field: description" \
+    "Warning message mentions missing description"
+
+  # Test missing content
+  local test_missing_content='<<<SKILL_CANDIDATE>>>
+category: patterns
+name: missing-content-skill
+description: Test skill missing content
+<<<END_SKILL_CANDIDATE>>>'
+
+  result=$(write_skill_candidate "$test_missing_content" "US-MALFORMED" 2>&1) && exit_code=0 || exit_code=$?
+
+  assert_equals 1 "$exit_code" \
+    "Returns non-zero when content missing"
+  assert_contains "$result" "missing required field: content" \
+    "Warning message mentions missing content"
+
+  # Test missing end delimiter
+  local test_missing_end='<<<SKILL_CANDIDATE>>>
+category: patterns
+name: missing-end-skill
+description: Test skill missing end delimiter
+content:
+Some content here but no end delimiter.'
+
+  result=$(write_skill_candidate "$test_missing_end" "US-MALFORMED" 2>&1) && exit_code=0 || exit_code=$?
+
+  assert_equals 1 "$exit_code" \
+    "Returns non-zero when end delimiter missing"
+  # When end delimiter is missing, content extraction fails - resulting in "missing content" warning
+  assert_contains "$result" "⚠" \
+    "Warning shown when end delimiter missing"
+  assert_file_not_exists "$TEST_SKILL_DIR/patterns/missing-end-skill.md" \
+    "No file created when end delimiter missing"
+}
+
+# ============================================================
+# TEST: Invalid category shows warning, no file created
+# ============================================================
+test_invalid_category() {
+  echo ""
+  echo "═══════════════════════════════════════════════════════"
+  echo "  TEST: Invalid category"
+  echo "═══════════════════════════════════════════════════════"
+
+  # Reset test directory
+  rm -rf "$TEST_SKILL_DIR"
+  mkdir -p "$TEST_SKILL_DIR"
+  source_skill_function
+
+  local test_bad_category='<<<SKILL_CANDIDATE>>>
+category: invalid-category
+name: bad-category-skill
+description: Use when testing invalid category handling
+content:
+This skill has an invalid category.
+<<<END_SKILL_CANDIDATE>>>'
+
+  local result
+  local exit_code
+  result=$(write_skill_candidate "$test_bad_category" "US-BADCAT" 2>&1) && exit_code=0 || exit_code=$?
+
+  assert_equals 1 "$exit_code" \
+    "Returns non-zero for invalid category"
+  assert_contains "$result" "invalid category" \
+    "Warning message mentions invalid category"
+  assert_contains "$result" "invalid-category" \
+    "Warning shows the attempted category"
+  assert_contains "$result" "error-resolutions, patterns, workflows" \
+    "Warning shows valid categories"
+  assert_file_not_exists "$TEST_SKILL_DIR/invalid-category/bad-category-skill.md" \
+    "No file created for invalid category"
+
+  # Test another invalid category
+  local test_typo_category='<<<SKILL_CANDIDATE>>>
+category: pattern
+name: typo-category-skill
+description: Use when testing typo in category
+content:
+This has a typo in the category (pattern vs patterns).
+<<<END_SKILL_CANDIDATE>>>'
+
+  result=$(write_skill_candidate "$test_typo_category" "US-TYPO" 2>&1) && exit_code=0 || exit_code=$?
+
+  assert_equals 1 "$exit_code" \
+    "Returns non-zero for typo in category (pattern vs patterns)"
+  assert_contains "$result" "invalid category: pattern" \
+    "Warning shows the typo category"
+}
+
+# ============================================================
+# TEST: Duplicate skill name shows warning, no overwrite
+# ============================================================
+test_duplicate_skill() {
+  echo ""
+  echo "═══════════════════════════════════════════════════════"
+  echo "  TEST: Duplicate skill name"
+  echo "═══════════════════════════════════════════════════════"
+
+  # Reset test directory
+  rm -rf "$TEST_SKILL_DIR"
+  mkdir -p "$TEST_SKILL_DIR"
+  source_skill_function
+
+  # First, create a skill
+  local first_skill='<<<SKILL_CANDIDATE>>>
+category: error-resolutions
+name: duplicate-test-skill
+description: Use when testing duplicate detection
+content:
+Original content - this should NOT be overwritten.
+<<<END_SKILL_CANDIDATE>>>'
+
+  local result
+  result=$(write_skill_candidate "$first_skill" "US-FIRST" 2>&1)
+
+  assert_contains "$result" "Extracted skill:" \
+    "First skill created successfully"
+  assert_file_exists "$TEST_SKILL_DIR/error-resolutions/duplicate-test-skill.md" \
+    "First skill file exists"
+
+  # Capture original content
+  local original_content
+  original_content=$(cat "$TEST_SKILL_DIR/error-resolutions/duplicate-test-skill.md")
+
+  # Now try to create a skill with the same name
+  local second_skill='<<<SKILL_CANDIDATE>>>
+category: error-resolutions
+name: duplicate-test-skill
+description: Use when testing - DUPLICATE ATTEMPT
+content:
+New content that should NOT replace the original.
+<<<END_SKILL_CANDIDATE>>>'
+
+  local exit_code
+  result=$(write_skill_candidate "$second_skill" "US-SECOND" 2>&1) && exit_code=0 || exit_code=$?
+
+  assert_equals 1 "$exit_code" \
+    "Returns non-zero for duplicate skill"
+  assert_contains "$result" "already exists" \
+    "Warning mentions skill already exists"
+  assert_contains "$result" "skipping" \
+    "Warning mentions skipping"
+
+  # Verify original content was not overwritten
+  local current_content
+  current_content=$(cat "$TEST_SKILL_DIR/error-resolutions/duplicate-test-skill.md")
+
+  if [ "$original_content" = "$current_content" ]; then
+    echo -e "${GREEN}✓${NC} Original file content preserved (not overwritten)"
+    TEST_PASSED=$((TEST_PASSED + 1))
+  else
+    echo -e "${RED}✗${NC} Original file was overwritten!"
+    TEST_FAILED=$((TEST_FAILED + 1))
+  fi
+
+  # Verify original story ID is preserved
+  assert_contains "$current_content" "Story: US-FIRST" \
+    "Original story ID preserved in file"
+}
+
+# ============================================================
 # Run all tests
 # ============================================================
 echo "╔═══════════════════════════════════════════════════════╗"
-echo "║  Ralph Skill Extraction Tests (US-005)                ║"
+echo "║  Ralph Skill Extraction Tests (US-005, US-006)        ║"
 echo "╚═══════════════════════════════════════════════════════╝"
 echo ""
 echo "Test skill directory: $TEST_SKILL_DIR"
@@ -396,6 +701,12 @@ test_valid_extraction
 test_directory_structure
 test_yaml_frontmatter
 test_multiline_content
+
+# Edge case tests (US-006)
+test_missing_block
+test_malformed_block
+test_invalid_category
+test_duplicate_skill
 
 # Summary
 echo ""
