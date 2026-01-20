@@ -1,11 +1,11 @@
 ---
 name: read-transcript
-description: "Search and retrieve context from previous Ralph iteration transcripts. Use when you need detailed context about what happened in a previous iteration beyond what's in progress.txt. Triggers on: read transcript, previous iteration, what happened in, search transcripts."
+description: "Search and retrieve context from previous Angainor iteration transcripts. Use when you need detailed context about what happened in a previous iteration beyond what's in progress.txt. Triggers on: read transcript, previous iteration, what happened in, search transcripts."
 ---
 
 # Read Transcript
 
-Search and retrieve full context from previous Ralph iteration transcripts.
+Search and retrieve full context from previous Angainor iteration transcripts.
 
 ---
 
@@ -39,7 +39,7 @@ The index at `transcripts/index.json` has this structure:
       "file": "2026-01-17-14-30-00-iteration-1.txt",
       "timestamp": "2026-01-17-14-30-00",
       "iteration": 1,
-      "branch": "ralph/feature-name",
+      "branch": "angainor/feature-name",
       "storyId": "US-001"
     }
   ]
@@ -65,7 +65,7 @@ Search transcripts from 2026-01-15 to 2026-01-17
 ### By Branch
 Find all iterations for a feature branch:
 ```
-Search transcripts for branch ralph/auth-system
+Search transcripts for branch angainor/auth-system
 ```
 
 ### By Iteration Number

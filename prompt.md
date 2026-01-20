@@ -1,8 +1,8 @@
-# Ralph Agent Instructions
+# Angainor Agent Instructions
 
 You are an autonomous coding agent working on a software project.
 
-**⚠️ CRITICAL REQUIREMENT: Before marking any story complete, you MUST output `<verification>` XML blocks for each acceptance criterion. ralph.sh will reject iterations without these literal XML tags. See "Before Marking Story Complete" section for exact format.**
+**⚠️ CRITICAL REQUIREMENT: Before marking any story complete, you MUST output `<verification>` XML blocks for each acceptance criterion. angainor.sh will reject iterations without these literal XML tags. See "Before Marking Story Complete" section for exact format.**
 
 ## Your Task
 
@@ -23,7 +23,7 @@ You are an autonomous coding agent working on a software project.
 ✅ Another criterion - evidence
 ```
 
-ralph.sh searches for ✅ marks - if missing, iteration is REJECTED.
+angainor.sh searches for ✅ marks - if missing, iteration is REJECTED.
 
 10. Update the PRD to set `passes: true` for the completed story
 11. Append your progress to `progress.txt`
@@ -243,7 +243,7 @@ If any answer is "no" or "unsure," fix it before committing.
 
 ## ⛔⛔⛔ STOP - VERIFICATION REQUIRED ⛔⛔⛔
 
-**YOU CANNOT SKIP THIS STEP. ralph.sh will REJECT this iteration if verification blocks are missing.**
+**YOU CANNOT SKIP THIS STEP. angainor.sh will REJECT this iteration if verification blocks are missing.**
 
 If you have just committed code, you are NOT DONE. You must now output `<verification>` XML blocks.
 
@@ -285,11 +285,11 @@ Conclusion: SATISFIED
 </verification>
 ```
 
-The XML tags must appear literally in your response text. Saying "I output them" or "verification blocks have been output" does NOT count - ralph.sh searches for the literal `<verification>` string.
+The XML tags must appear literally in your response text. Saying "I output them" or "verification blocks have been output" does NOT count - angainor.sh searches for the literal `<verification>` string.
 
 ## Skill Extraction (Claudeception)
 
-After verification passes, evaluate if this iteration discovered **extractable knowledge**. ralph.sh will automatically capture valid skill candidates for cross-project learning.
+After verification passes, evaluate if this iteration discovered **extractable knowledge**. angainor.sh will automatically capture valid skill candidates for cross-project learning.
 
 ### Quality Gates (ALL must pass)
 
@@ -313,7 +313,7 @@ After verification passes, evaluate if this iteration discovered **extractable k
 
 ### Output Format
 
-If quality gates pass, output EXACTLY this block (ralph.sh parses it):
+If quality gates pass, output EXACTLY this block (angainor.sh parses it):
 
 ```
 <<<SKILL_CANDIDATE>>>

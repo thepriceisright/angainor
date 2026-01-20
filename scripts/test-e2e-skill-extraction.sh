@@ -9,7 +9,7 @@
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-RALPH_DIR="$(dirname "$SCRIPT_DIR")"
+ANGAINOR_DIR="$(dirname "$SCRIPT_DIR")"
 
 # Test configuration - use temp directory to avoid polluting real skill directory
 TEST_SKILL_DIR=$(mktemp -d)
@@ -110,21 +110,21 @@ create_mock_prd() {
   cat > "$TEST_PRD_FILE" << 'EOF'
 {
   "project": "TestProject",
-  "branchName": "ralph/test-feature",
+  "branchName": "angainor/test-feature",
   "description": "Test project for e2e skill extraction",
   "userStories": []
 }
 EOF
 }
 
-# Source the write_skill_candidate function from ralph.sh with overrides
+# Source the write_skill_candidate function from angainor.sh with overrides
 source_skill_function() {
   # Override SKILL_DIR and PRD_FILE for testing
   SKILL_DIR="$TEST_SKILL_DIR"
   PRD_FILE="$TEST_PRD_FILE"
 
   # Extract the write_skill_candidate function
-  eval "$(sed -n '/^write_skill_candidate()/,/^}/p' "$RALPH_DIR/ralph.sh")"
+  eval "$(sed -n '/^write_skill_candidate()/,/^}/p' "$ANGAINOR_DIR/angainor.sh")"
 }
 
 # ============================================================
@@ -140,10 +140,10 @@ test_e2e_integration() {
   create_mock_prd
   source_skill_function
 
-  # Simulate a full Ralph iteration output with skill candidate
+  # Simulate a full Angainor iteration output with skill candidate
   local mock_iteration_output='
 ═══════════════════════════════════════════════════════
-  Ralph Iteration 3 of 10
+  Angainor Iteration 3 of 10
 ═══════════════════════════════════════════════════════
 
 Starting implementation of US-003...

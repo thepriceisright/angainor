@@ -9,7 +9,7 @@
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-RALPH_DIR="$(dirname "$SCRIPT_DIR")"
+ANGAINOR_DIR="$(dirname "$SCRIPT_DIR")"
 
 # Test configuration
 TEST_SKILL_DIR=$(mktemp -d)
@@ -133,15 +133,15 @@ assert_dir_exists() {
   fi
 }
 
-# Source the write_skill_candidate function from ralph.sh
+# Source the write_skill_candidate function from angainor.sh
 # We need to extract and source just the function, overriding SKILL_DIR
 source_skill_function() {
   # Override SKILL_DIR for testing
   SKILL_DIR="$TEST_SKILL_DIR"
-  PRD_FILE="$RALPH_DIR/prd.json"
+  PRD_FILE="$ANGAINOR_DIR/prd.json"
 
   # Extract the write_skill_candidate function
-  eval "$(sed -n '/^write_skill_candidate()/,/^}/p' "$RALPH_DIR/ralph.sh")"
+  eval "$(sed -n '/^write_skill_candidate()/,/^}/p' "$ANGAINOR_DIR/angainor.sh")"
 }
 
 # ============================================================
@@ -692,7 +692,7 @@ New content that should NOT replace the original.
 # Run all tests
 # ============================================================
 echo "╔═══════════════════════════════════════════════════════╗"
-echo "║  Ralph Skill Extraction Tests (US-005, US-006)        ║"
+echo "║  Angainor Skill Extraction Tests (US-005, US-006)        ║"
 echo "╚═══════════════════════════════════════════════════════╝"
 echo ""
 echo "Test skill directory: $TEST_SKILL_DIR"

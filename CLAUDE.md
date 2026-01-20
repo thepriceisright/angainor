@@ -2,17 +2,17 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-## What is Ralph?
+## What is Angainor?
 
-Ralph is an autonomous AI agent loop that executes Product Requirements Documents (PRDs) by running Claude Code repeatedly until all tasks are complete. Each iteration spawns a fresh Claude instance with clean context. Memory persists through git history, structured files (`prd.json`, `progress.txt`), and full transcript logs in `transcripts/`.
+Angainor is an autonomous AI agent loop that executes Product Requirements Documents (PRDs) by running Claude Code repeatedly until all tasks are complete. Each iteration spawns a fresh Claude instance with clean context. Memory persists through git history, structured files (`prd.json`, `progress.txt`), and full transcript logs in `transcripts/`.
 
 Based on [Geoffrey Huntley's Ralph pattern](https://ghuntley.com/ralph/).
 
 ## Commands
 
 ```bash
-# Run Ralph (from a project that has prd.json)
-./ralph.sh [max_iterations]    # default: 10 iterations
+# Run Angainor (from a project that has prd.json)
+./angainor.sh [max_iterations]    # default: 10 iterations
 
 # Flowchart visualization (interactive React Flow diagram)
 cd flowchart && npm install && npm run dev    # dev server
@@ -23,17 +23,17 @@ cd flowchart && npm run lint                  # lint check
 ## Repository Structure
 
 ```
-├── ralph.sh              # Main bash loop that spawns fresh Claude instances
-├── prompt.md             # Instructions given to each Claude instance during Ralph execution
+├── angainor.sh              # Main bash loop that spawns fresh Claude instances
+├── prompt.md             # Instructions given to each Claude instance during Angainor execution
 ├── prd.json.example      # Example PRD format for reference
-├── skills/               # Claude Code skills for the Ralph workflow
+├── skills/               # Claude Code skills for the Angainor workflow
 │   ├── prd/              # Generate PRDs from feature descriptions
-│   ├── ralph/            # Convert markdown PRDs to prd.json format
+│   ├── angainor/            # Convert markdown PRDs to prd.json format
 │   └── read-transcript/  # Search previous iteration transcripts
 └── flowchart/            # Interactive React Flow visualization (Vite + React 19 + TypeScript)
 ```
 
-## Architecture: The Ralph Loop
+## Architecture: The Angainor Loop
 
 ```
 1. Read prd.json → Find next story where passes=false
@@ -81,40 +81,40 @@ Consolidate reusable patterns at the TOP of progress.txt in a `## Codebase Patte
 When all stories have `passes: true`, output: `<promise>COMPLETE</promise>`
 
 ### Verification Enforcement
-ralph.sh enforces that each iteration includes `<verification>` blocks before accepting story completion. If blocks are missing or contain `NOT_SATISFIED`, the iteration fails and doesn't count toward completion.
+angainor.sh enforces that each iteration includes `<verification>` blocks before accepting story completion. If blocks are missing or contain `NOT_SATISFIED`, the iteration fails and doesn't count toward completion.
 
-Flexible verification: ralph.sh accepts either `<verification>` XML blocks OR ✅ checkmarks as valid verification evidence.
+Flexible verification: angainor.sh accepts either `<verification>` XML blocks OR ✅ checkmarks as valid verification evidence.
 
-### Ralph Profile
-ralph.sh configures a minimal plugin environment for autonomous runs:
+### Angainor Profile
+angainor.sh configures a minimal plugin environment for autonomous runs:
 
 **Disabled plugins** (restored on exit):
 - `automatic-code-review@claude-skillz` - Interferes with autonomous iteration flow
 - `explanatory-output-style@claude-plugins-official` - Adds unnecessary verbosity
 
 **Plugin lifecycle:**
-- `configure_ralph_profile()` disables plugins at startup
+- `configure_angainor_profile()` disables plugins at startup
 - `restore_plugins()` re-enables on exit (normal, Ctrl+C, or error)
 - Missing plugins are handled gracefully (no errors)
 
 **Minimum plugin set** (what remains enabled):
 - Core: Essential Claude Code functionality
 - Testing: Framework detection, test runners
-- Domain: Project-specific skills (prd, ralph, read-transcript)
+- Domain: Project-specific skills (prd, angainor, read-transcript)
 
 ### Metrics Output
-ralph.sh writes iteration metrics to `metrics.json` in the script directory:
+angainor.sh writes iteration metrics to `metrics.json` in the script directory:
 ```json
 {"iterations": [{"timestamp": "...", "duration_seconds": N, "story_id": "US-001", "status": "success|failed|blocked", "lines_changed": N, "files_changed": N, "estimated_tokens": N, "failure_reason": ""}]}
 ```
 A human-readable summary prints on loop completion.
 
 ### Skill Extraction (Claudeception)
-Ralph iterations can extract reusable skills for cross-project learning. When an iteration discovers non-obvious, verified knowledge, it outputs a `<<<SKILL_CANDIDATE>>>` block that ralph.sh parses and writes to disk.
+Angainor iterations can extract reusable skills for cross-project learning. When an iteration discovers non-obvious, verified knowledge, it outputs a `<<<SKILL_CANDIDATE>>>` block that angainor.sh parses and writes to disk.
 
 **Quality gates** (all must pass): Non-obvious, reusable beyond this project, verified working, has specific trigger.
 
-**Categories:** `error-resolutions`, `patterns`, `workflows` | **Storage:** `~/.claude/skills/ralph-learnings/<category>/<name>.md`
+**Categories:** `error-resolutions`, `patterns`, `workflows` | **Storage:** `~/.claude/skills/angainor-learnings/<category>/<name>.md`
 
 **Output format:**
 ```
@@ -132,7 +132,7 @@ Skills are automatically available to future Claude Code sessions across all pro
 | Skill | Trigger phrases | Purpose |
 |-------|-----------------|---------|
 | `prd` | "create a prd", "write prd for", "plan this feature" | Generate detailed PRDs with clarifying questions |
-| `ralph` | "convert this prd", "ralph json", "create prd.json" | Convert markdown PRDs to prd.json format |
+| `angainor` | "convert this prd", "angainor json", "create prd.json" | Convert markdown PRDs to prd.json format |
 | `read-transcript` | "search transcripts", "previous iteration", "what happened in" | Search deep context from transcripts/ |
 
 ## prd.json Format
@@ -140,7 +140,7 @@ Skills are automatically available to future Claude Code sessions across all pro
 ```json
 {
   "project": "ProjectName",
-  "branchName": "ralph/feature-name-kebab-case",
+  "branchName": "angainor/feature-name-kebab-case",
   "description": "Feature description",
   "userStories": [
     {

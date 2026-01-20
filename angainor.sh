@@ -1,6 +1,6 @@
 #!/bin/bash
-# Ralph Wiggum - Long-running AI agent loop
-# Usage: ./ralph.sh [max_iterations]
+# Angainor Wiggum - Long-running AI agent loop
+# Usage: ./angainor.sh [max_iterations]
 
 set -e
 
@@ -14,18 +14,18 @@ TRANSCRIPT_DIR="$SCRIPT_DIR/transcripts"
 TRANSCRIPT_INDEX="$TRANSCRIPT_DIR/index.json"
 METRICS_FILE="$SCRIPT_DIR/metrics.json"
 SCREENSHOT_DIR="$SCRIPT_DIR/screenshots"
-SKILL_DIR="$HOME/.claude/skills/ralph-learnings"
+SKILL_DIR="$HOME/.claude/skills/angainor-learnings"
 
-# Plugins to disable during Ralph runs (interfering with autonomous execution)
-RALPH_DISABLE_PLUGINS=(
+# Plugins to disable during Angainor runs (interfering with autonomous execution)
+ANGAINOR_DISABLE_PLUGINS=(
   "automatic-code-review@claude-skillz"
   "explanatory-output-style@claude-plugins-official"
 )
 
-# Configure Ralph profile by disabling interfering plugins
-configure_ralph_profile() {
-  echo "Configuring Ralph profile (disabling interfering plugins)..."
-  for plugin in "${RALPH_DISABLE_PLUGINS[@]}"; do
+# Configure Angainor profile by disabling interfering plugins
+configure_angainor_profile() {
+  echo "Configuring Angainor profile (disabling interfering plugins)..."
+  for plugin in "${ANGAINOR_DISABLE_PLUGINS[@]}"; do
     if claude plugin disable "$plugin" 2>/dev/null; then
       echo "  Disabled: $plugin"
     else
@@ -38,7 +38,7 @@ configure_ralph_profile() {
 # Restore plugins to their original state
 restore_plugins() {
   echo "Restoring plugins..."
-  for plugin in "${RALPH_DISABLE_PLUGINS[@]}"; do
+  for plugin in "${ANGAINOR_DISABLE_PLUGINS[@]}"; do
     if claude plugin enable "$plugin" 2>/dev/null; then
       echo "  Enabled: $plugin"
     else
@@ -107,7 +107,7 @@ print_metrics_summary() {
 
   echo ""
   echo "═══════════════════════════════════════════════════════"
-  echo "  RALPH METRICS SUMMARY"
+  echo "  ANGAINOR METRICS SUMMARY"
   echo "═══════════════════════════════════════════════════════"
   echo "  Total iterations:     $total_iterations"
   echo "  Successful stories:   $successful_stories"
@@ -270,8 +270,8 @@ if [ -f "$PRD_FILE" ] && [ -f "$LAST_BRANCH_FILE" ]; then
   if [ -n "$CURRENT_BRANCH" ] && [ -n "$LAST_BRANCH" ] && [ "$CURRENT_BRANCH" != "$LAST_BRANCH" ]; then
     # Archive the previous run
     DATE=$(date +%Y-%m-%d)
-    # Strip "ralph/" prefix from branch name for folder
-    FOLDER_NAME=$(echo "$LAST_BRANCH" | sed 's|^ralph/||')
+    # Strip "angainor/" prefix from branch name for folder
+    FOLDER_NAME=$(echo "$LAST_BRANCH" | sed 's|^angainor/||')
     ARCHIVE_FOLDER="$ARCHIVE_DIR/$DATE-$FOLDER_NAME"
 
     echo "Archiving previous run: $LAST_BRANCH"
@@ -285,7 +285,7 @@ if [ -f "$PRD_FILE" ] && [ -f "$LAST_BRANCH_FILE" ]; then
     echo "   Archived to: $ARCHIVE_FOLDER"
 
     # Reset progress file for new run
-    echo "# Ralph Progress Log" > "$PROGRESS_FILE"
+    echo "# Angainor Progress Log" > "$PROGRESS_FILE"
     echo "Started: $(date)" >> "$PROGRESS_FILE"
     echo "---" >> "$PROGRESS_FILE"
 
@@ -306,20 +306,20 @@ fi
 
 # Initialize progress file if it doesn't exist
 if [ ! -f "$PROGRESS_FILE" ]; then
-  echo "# Ralph Progress Log" > "$PROGRESS_FILE"
+  echo "# Angainor Progress Log" > "$PROGRESS_FILE"
   echo "Started: $(date)" >> "$PROGRESS_FILE"
   echo "---" >> "$PROGRESS_FILE"
 fi
 
-# Configure Ralph profile (disable interfering plugins) before main loop
-configure_ralph_profile
+# Configure Angainor profile (disable interfering plugins) before main loop
+configure_angainor_profile
 
-echo "Starting Ralph - Max iterations: $MAX_ITERATIONS"
+echo "Starting Angainor - Max iterations: $MAX_ITERATIONS"
 
 for i in $(seq 1 $MAX_ITERATIONS); do
   echo ""
   echo "═══════════════════════════════════════════════════════"
-  echo "  Ralph Iteration $i of $MAX_ITERATIONS"
+  echo "  Angainor Iteration $i of $MAX_ITERATIONS"
   echo "═══════════════════════════════════════════════════════"
 
   # Capture iteration start time for metrics
@@ -337,7 +337,7 @@ for i in $(seq 1 $MAX_ITERATIONS); do
   for retry in $(seq 1 $MAX_RETRIES); do
     echo "  Calling Claude API (attempt $retry/$MAX_RETRIES)..."
 
-    # Run Claude with the ralph prompt, capturing to transcript
+    # Run Claude with the angainor prompt, capturing to transcript
     OUTPUT=$(claude --dangerously-skip-permissions --print < "$SCRIPT_DIR/prompt.md" 2>&1 | tee /dev/stderr "$TRANSCRIPT_FILE") || true
     CLAUDE_EXIT_CODE=$?
 
@@ -425,7 +425,7 @@ EOF
   # Check for completion signal FIRST - if all stories are done, no verification needed
   if echo "$OUTPUT" | grep -q "<promise>COMPLETE</promise>"; then
     echo ""
-    echo "Ralph completed all tasks!"
+    echo "Angainor completed all tasks!"
     echo "Completed at iteration $i of $MAX_ITERATIONS"
     record_metrics "success" "COMPLETE" ""
     print_metrics_summary
@@ -490,7 +490,7 @@ EOF
 done
 
 echo ""
-echo "Ralph reached max iterations ($MAX_ITERATIONS) without completing all tasks."
+echo "Angainor reached max iterations ($MAX_ITERATIONS) without completing all tasks."
 echo "Check $PROGRESS_FILE for status."
 print_metrics_summary
 exit 1

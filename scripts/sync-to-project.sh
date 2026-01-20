@@ -1,19 +1,19 @@
 #!/usr/bin/env bash
-# sync-to-project.sh - Sync Ralph files to a target project
+# sync-to-project.sh - Sync Angainor files to a target project
 #
 # Usage: ./scripts/sync-to-project.sh <target-directory>
 #
-# This script copies all files necessary to run the Ralph loop:
-#   - ralph.sh (main loop)
+# This script copies all files necessary to run the Angainor loop:
+#   - angainor.sh (main loop)
 #   - prompt.md (agent instructions)
-#   - skills/ (prd, ralph, read-transcript skills)
+#   - skills/ (prd, angainor, read-transcript skills)
 #   - scripts/migrate-prd.sh (PRD migration utility)
 #
 # It does NOT copy project-specific files (prd.json, progress.txt, etc.)
 
 set -euo pipefail
 
-# Get script directory (where claude-and-ralph repo is)
+# Get script directory (where claude-and-angainor repo is)
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SOURCE_DIR="$(dirname "$SCRIPT_DIR")"
 
@@ -33,13 +33,13 @@ if [[ ! -d "$TARGET_DIR" ]]; then
     exit 1
 fi
 
-echo "Syncing Ralph files from: $SOURCE_DIR"
+echo "Syncing Angainor files from: $SOURCE_DIR"
 echo "                      to: $TARGET_DIR"
 echo ""
 
 # Files to copy
 FILES_TO_COPY=(
-    "ralph.sh"
+    "angainor.sh"
     "prompt.md"
 )
 
@@ -90,8 +90,8 @@ echo ""
 echo "Sync complete!"
 echo ""
 echo "Files synced:"
-ls -la "$TARGET_DIR/ralph.sh" "$TARGET_DIR/prompt.md" 2>/dev/null || true
+ls -la "$TARGET_DIR/angainor.sh" "$TARGET_DIR/prompt.md" 2>/dev/null || true
 echo ""
-echo "To run Ralph in the target project:"
+echo "To run Angainor in the target project:"
 echo "  cd $TARGET_DIR"
-echo "  ./ralph.sh [max_iterations]"
+echo "  ./angainor.sh [max_iterations]"

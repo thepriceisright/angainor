@@ -1,106 +1,329 @@
-# Ralph
+# Angainor
 
-![Ralph](ralph.webp)
+**Autonomous AI agent loop for executing Product Requirements Documents (PRDs) with Claude Code.**
 
-**Ralph is an autonomous AI agent loop that executes Product Requirements Documents (PRDs) by running Claude Code repeatedly until all tasks are complete.** Each iteration spawns a fresh Claude instance with clean context. Memory persists through git history, structured files, and searchable transcript logs.
+Angainor spawns fresh Claude instances iteratively, implementing user stories one at a time until complete. Memory persists through git commits, structured state files, and searchable transcripts. Each iteration is independent, making the system resilient and scalable.
 
 Based on [Geoffrey Huntley's Ralph pattern](https://ghuntley.com/ralph/).
 
-[![Interactive Flowchart](ralph-flowchart.png)](https://snarktank.github.io/ralph/)
+---
 
-**[View Interactive Flowchart](https://snarktank.github.io/ralph/)** — Click through each step with animations
+## Table of Contents
+
+- [Why Angainor?](#why-angainor)
+- [Quick Start](#quick-start)
+- [How It Works](#how-it-works)
+- [Advanced Features](#advanced-features)
+- [Key Concepts](#key-concepts)
+- [Skills](#skills)
+- [PRD Format](#prd-format)
+- [Configuration](#configuration)
+- [Debugging](#debugging)
+- [Troubleshooting](#troubleshooting)
 
 ---
 
-## Why Ralph?
+## Why Angainor?
 
 Traditional AI coding faces these challenges:
 
-| Problem | Ralph's Solution |
+| Problem | Angainor's Solution |
 |---------|------------------|
 | Context window limits | Fresh context per story, unlimited total capacity |
 | Context pollution | Each iteration starts clean |
 | Manual coordination | Autonomous progression through PRD |
 | Quality regression | Automated quality gates before every commit |
 | Lost implementation details | Searchable transcript logs |
+| Knowledge silos | Automatic skill extraction for cross-project learning |
 
-Ralph is ideal for: feature implementation, schema migrations, systematic refactoring, adding test coverage, and any multi-step task with clear acceptance criteria.
+Angainor is ideal for: feature implementation, schema migrations, systematic refactoring, adding test coverage, and any multi-step task with clear acceptance criteria.
 
 ---
 
 ## Quick Start
 
-### 1. Install
+### Installation
+
+Install Angainor in any project with a single command:
 
 ```bash
-# Copy to your project
-mkdir -p scripts/ralph && cd scripts/ralph
-curl -O https://raw.githubusercontent.com/snarktank/ralph/main/ralph.sh
-curl -O https://raw.githubusercontent.com/snarktank/ralph/main/prompt.md
-chmod +x ralph.sh
-
-# Install skills globally (optional but recommended)
-cd ~/.claude/skills
-git clone https://github.com/snarktank/ralph.git ralph-repo
-cp -r ralph-repo/skills/* . && rm -rf ralph-repo
+curl -fsSL https://raw.githubusercontent.com/thepriceisright/angainor/main/install-angainor.sh | bash
 ```
 
-### 2. Create PRD
-
-```
-# In Claude Code session:
-> Load the prd skill and create a PRD for [your feature]
-```
-
-Answer the clarifying questions. Output: `tasks/prd-[feature].md`
-
-### 3. Convert to JSON
-
-```
-> Load the ralph skill and convert tasks/prd-[feature].md to prd.json
-```
-
-### 4. Run
+Or install to a specific directory:
 
 ```bash
-./scripts/ralph/ralph.sh 20  # max 20 iterations
+curl -fsSL https://raw.githubusercontent.com/thepriceisright/angainor/main/install-angainor.sh | bash -s /path/to/project
 ```
 
-Ralph implements each story, validates, commits, and continues until all stories pass.
+This installs:
+- `.angainor/` directory with core files and skills
+- `./angainor.sh` wrapper script
+- Automatic `.claude/settings.json` configuration
+- `.gitignore` entries for generated files
+
+### Prerequisites
+
+- [Claude Code CLI](https://claude.ai/code) installed and authenticated
+- `jq` (JSON processor): `brew install jq` / `apt install jq`
+- `git` (version control)
+
+### Basic Usage
+
+1. **Create a PRD** using the `/prd` skill:
+
+```bash
+claude
+# In Claude session:
+/prd
+# Describe your feature, answer clarifying questions
+```
+
+2. **Convert to prd.json** using the `/angainor` skill:
+
+```bash
+claude
+# In Claude session:
+/angainor
+# Point to your PRD markdown file
+```
+
+3. **Run Angainor**:
+
+```bash
+./angainor.sh          # Run with default 10 iterations
+./angainor.sh 20       # Run with custom iteration limit
+```
+
+4. **Monitor progress**:
+   - Watch console output for real-time status
+   - Check `progress.txt` for cumulative learnings
+   - View `transcripts/` for full iteration logs
+   - See `metrics.json` for performance data
 
 ---
 
 ## How It Works
 
+### The Angainor Loop
+
 ```
 ┌─────────────────────────────────────────────────────────┐
-│  1. Read prd.json → Find next story where passes=false  │
-│  2. Read progress.txt → Learn from previous iterations  │
-│  3. Implement that single story                         │
-│  4. Run quality checks (typecheck, tests, lint)         │
-│  5. Commit if checks pass                               │
-│  6. Update prd.json → passes=true                       │
-│  7. Append learnings to progress.txt                    │
-│  8. Save transcript to transcripts/                     │
-│  9. Spawn fresh Claude → REPEAT                         │
-└─────────────────────────────────────────────────────────┘
-         ↓ When all stories pass ↓
-      Output: <promise>COMPLETE</promise>
+│  START: Configure Angainor Profile                      │
+│  - Disable interfering plugins                          │
+│  - Set up autonomous execution environment              │
+└───────────────────┬─────────────────────────────────────┘
+                    │
+                    ▼
+┌─────────────────────────────────────────────────────────┐
+│  ITERATION N: Spawn Fresh Claude Instance               │
+├─────────────────────────────────────────────────────────┤
+│  1. Read prd.json → Find next story (passes=false)      │
+│  2. Read progress.txt → Check Codebase Patterns first   │
+│  3. Verify branch: checkout/create if needed            │
+│  4. Implement ONLY that single story                    │
+│  5. Run quality checks (typecheck, lint, test)          │
+│  6. If checks fail → retry or mark blocked              │
+│  7. Commit: feat: [Story ID] - [Story Title]            │
+│  8. Output verification blocks (XML or ✅ checkmarks)   │
+│  9. Update prd.json → Set passes=true                   │
+│ 10. Append learnings to progress.txt                    │
+│ 11. Save transcript to transcripts/[timestamp].txt      │
+│ 12. Extract skills if quality gates pass                │
+└───────────────────┬─────────────────────────────────────┘
+                    │
+                    ▼
+              ┌─────────────┐
+              │ All stories │
+              │  complete?  │
+              └──┬──────┬───┘
+                 │      │
+            YES  │      │ NO
+                 │      │
+                 ▼      └──────┐
+    ┌────────────────────┐     │
+    │ <promise>          │     │
+    │   COMPLETE         │     │
+    │ </promise>         │     │
+    │                    │     │
+    │ Print Metrics      │     │
+    │ Restore Plugins    │     │
+    │ EXIT SUCCESS       │     │
+    └────────────────────┘     │
+                               │
+              ┌────────────────┘
+              │
+              ▼
+    Spawn Next Claude Instance
+    (Loop to ITERATION N+1)
 ```
+
+### Memory Model
+
+Angainor maintains context across stateless iterations through four memory layers:
+
+| Layer | File | Purpose | Persistence |
+|-------|------|---------|-------------|
+| **Implementation Memory** | Git commits | Code changes and evolution | Permanent (git history) |
+| **Learning Memory** | `progress.txt` | Patterns, gotchas, context | Append-only, archived on branch change |
+| **Task Status Memory** | `prd.json` | Which stories are done, blocked | Updated each iteration |
+| **Deep Context Memory** | `transcripts/*.txt` | Full conversation logs | Searchable via `/read-transcript` skill |
+
+**Why this works:**
+- Git commits show WHAT changed
+- progress.txt explains WHY and documents learnings
+- prd.json tracks WHERE we are
+- transcripts provide deep HOW context when needed
 
 ---
 
-## Prerequisites
+## Advanced Features
 
-**Required:**
-- [Claude Code CLI](https://claude.ai/code) — installed and authenticated
-- [jq](https://jqlang.github.io/jq/) — `brew install jq` or `apt install jq`
-- Git repository
+### 1. Skill Extraction (Claudeception)
 
-**Recommended:**
-- TypeScript/type checker for your language
-- Test framework
-- CI/CD pipeline
+Inspired by [Claudeception](https://github.com/blader/Claudeception), Angainor can automatically extract reusable knowledge from successful iterations and save it as Claude Code skills for future projects.
+
+**How it works:**
+
+1. Iteration completes successfully
+2. Claude evaluates if the solution meets **quality gates**
+3. If yes, outputs a `<<<SKILL_CANDIDATE>>>` block
+4. `angainor.sh` parses and writes to `~/.claude/skills/angainor-learnings/`
+5. Skill becomes available in all future Claude sessions
+
+**Quality gates (ALL must pass):**
+- **Non-obvious**: Not documented in standard libraries/frameworks
+- **Reusable**: Applies beyond this specific project
+- **Verified**: Tested and confirmed working in this iteration
+- **Specific trigger**: Clear condition for when to apply it
+
+**Categories:**
+
+| Category | Purpose | Examples |
+|----------|---------|----------|
+| `error-resolutions` | Fixes for cryptic errors, version conflicts | "pnpm ENOENT error with turbo", "Vite HMR not working with React 19" |
+| `patterns` | Reusable code patterns, architectural approaches | "Optimistic UI updates with Server Actions", "Type-safe environment variables" |
+| `workflows` | Multi-step processes, debugging strategies | "Debugging Next.js hydration mismatches", "Setting up Playwright in CI" |
+
+**Storage:** `~/.claude/skills/angainor-learnings/<category>/<name>.md`
+
+### 2. Angainor Profile (Plugin Management)
+
+Angainor configures a minimal plugin environment for autonomous execution by disabling plugins that interfere with the iteration loop.
+
+**Disabled plugins:**
+
+| Plugin | Reason |
+|--------|--------|
+| `automatic-code-review@claude-skillz` | Interferes with autonomous iteration flow |
+| `explanatory-output-style@claude-plugins-official` | Adds unnecessary verbosity |
+
+**Lifecycle:**
+- `configure_angainor_profile()` disables plugins at startup
+- `restore_plugins()` re-enables on exit (normal, Ctrl+C, or error)
+- Missing plugins handled gracefully (no errors)
+
+### 3. Metrics Tracking
+
+Every iteration records performance metrics to `metrics.json`:
+
+```json
+{
+  "iterations": [
+    {
+      "timestamp": "2026-01-20-14-30-00",
+      "duration_seconds": 127,
+      "story_id": "US-001",
+      "status": "success",
+      "lines_changed": 42,
+      "files_changed": 3,
+      "estimated_tokens": 5200,
+      "failure_reason": ""
+    }
+  ]
+}
+```
+
+**Metrics summary (printed on completion):**
+
+```
+═══════════════════════════════════════════════════════
+  ANGAINOR METRICS SUMMARY
+═══════════════════════════════════════════════════════
+  Total iterations:     8
+  Successful stories:   6
+  Blocked stories:      1
+  Failed iterations:    1
+  Total duration:       15m 32s
+  Average time/story:   1m 56s
+═══════════════════════════════════════════════════════
+```
+
+### 4. Verification Enforcement
+
+Angainor enforces evidence-based verification before accepting story completion:
+
+**Verification formats accepted:**
+- XML blocks: `<verification>...</verification>`
+- Checkmarks: `✅ Criterion - evidence`
+
+**Requirements:**
+- Every acceptance criterion must have verification
+- Must include concrete evidence (command output, file references)
+- Any `NOT_SATISFIED` conclusion or `❌` fails the iteration
+
+**Example verification (checkmark format):**
+
+```markdown
+## Verification
+
+✅ Typecheck passes - ran npm run typecheck, exit 0
+✅ UI displays correctly - tested in dev-browser, badge shows
+✅ Filter persists - navigated to ?priority=high, refreshed, still active
+```
+
+### 5. Retry Logic & Error Handling
+
+Angainor handles transient API errors gracefully:
+
+- **Retry on**: Connection errors, rate limits, empty responses
+- **Max retries**: 3 attempts with exponential backoff
+- **Failure handling**: Records error in metrics, continues to next iteration
+- **Error reporting**: Last response printed on unexpected exits
+
+### 6. Transcript Indexing
+
+All iteration transcripts are indexed for fast searching via `/read-transcript` skill:
+
+```json
+{
+  "transcripts": [
+    {
+      "file": "2026-01-20-14-30-00-iteration-1.txt",
+      "timestamp": "2026-01-20-14-30-00",
+      "iteration": 1,
+      "branch": "angainor/task-priority",
+      "storyId": "US-001"
+    }
+  ]
+}
+```
+
+### 7. Archiving
+
+When switching to a new feature (different `branchName` in prd.json), Angainor automatically archives the previous run:
+
+```
+archive/
+├── 2026-01-15-task-priority/
+│   ├── prd.json
+│   ├── progress.txt
+│   └── transcripts/
+└── 2026-01-18-user-auth/
+    ├── prd.json
+    ├── progress.txt
+    └── transcripts/
+```
 
 ---
 
@@ -134,7 +357,7 @@ Stories execute by priority (1, 2, 3...). Order matters:
 
 ### Quality Gates
 
-Ralph only commits code that passes quality checks. Configure in `prompt.md`:
+Angainor only commits code that passes quality checks. Configure in `prompt.md`:
 
 ```bash
 npx tsc --noEmit  # TypeScript
@@ -197,7 +420,7 @@ Consolidate reusable patterns at the **top** in a `## Codebase Patterns` section
 ```json
 {
   "project": "MyApp",
-  "branchName": "ralph/feature-name",
+  "branchName": "angainor/feature-name",
   "description": "Feature description",
   "userStories": [
     {
@@ -220,19 +443,206 @@ Consolidate reusable patterns at the **top** in a `## Codebase Patterns` section
 
 ## Skills
 
-| Skill | Triggers | Purpose |
-|-------|----------|---------|
-| **prd** | `create a prd`, `write prd for`, `plan this feature` | Generate PRDs with clarifying questions |
-| **ralph** | `convert this prd`, `ralph json`, `create prd.json` | Convert markdown PRD to JSON format |
-| **read-transcript** | `search transcripts`, `previous iteration` | Search deep context from past iterations |
+Angainor includes three built-in skills for the PRD workflow:
 
-### Transcript Search Examples
+### `/prd` - PRD Generator
+
+**Description:** Generate detailed Product Requirements Documents from feature descriptions.
+
+**Triggers:** `create a prd`, `write prd for`, `plan this feature`, `requirements for`, `spec out`
+
+**Process:**
+1. Ask 3-5 essential clarifying questions (with lettered options)
+2. Generate structured PRD based on answers
+3. Save to `tasks/prd-[feature-name].md`
+
+**Output sections:**
+- Introduction/Overview
+- Goals
+- User Stories (with acceptance criteria)
+- Functional Requirements
+- Non-Goals
+- Design Considerations
+- Technical Considerations
+- Success Metrics
+- Open Questions
+
+**Key features:**
+- Stories sized for one context window
+- Verifiable acceptance criteria
+- UI stories include "Verify in browser" criterion
+
+### `/angainor` - PRD to JSON Converter
+
+**Description:** Convert markdown PRDs to prd.json format for Angainor execution.
+
+**Triggers:** `convert this prd`, `turn this into angainor format`, `create prd.json from this`, `angainor json`
+
+**Process:**
+1. Read existing PRD markdown
+2. Split large stories if needed
+3. Order by dependencies (schema → backend → UI)
+4. Add required criteria (typecheck, browser verification)
+5. Generate prd.json
+
+**Story sizing rules:**
+- Completable in ONE iteration (one context window)
+- Describable in 2-3 sentences
+- Max 5 files modified
+
+**Dependency ordering:**
+1. Database schema / migrations
+2. Backend logic / server actions
+3. UI components
+4. Aggregate views / dashboards
+
+### `/read-transcript` - Transcript Search
+
+**Description:** Search and retrieve context from previous iteration transcripts.
+
+**Triggers:** `search transcripts`, `previous iteration`, `what happened in`, `read transcript`
+
+**Search methods:**
+- By story ID: `Search transcripts for story US-003`
+- By date range: `Search transcripts from 2026-01-15 to 2026-01-17`
+- By branch: `Search transcripts for branch angainor/auth-system`
+- By iteration number: `Read transcript from iteration 5`
+
+**Use cases:**
+- Understanding HOW something was implemented
+- Debugging issues from previous iterations
+- Finding detailed context beyond progress.txt
+
+---
+
+## PRD Format
+
+Angainor uses a JSON format for tracking story status and execution:
+
+```json
+{
+  "project": "MyApp",
+  "branchName": "angainor/feature-name-kebab-case",
+  "description": "Brief feature description",
+  "userStories": [
+    {
+      "id": "US-001",
+      "title": "Short descriptive title",
+      "description": "As a [user], I want [feature] so that [benefit]",
+      "acceptanceCriteria": [
+        "Verifiable criterion 1",
+        "Verifiable criterion 2",
+        "Typecheck passes"
+      ],
+      "priority": 1,
+      "passes": false,
+      "status": "pending",
+      "attempts": 0,
+      "notes": ""
+    }
+  ]
+}
+```
+
+### Field Reference
+
+| Field | Type | Values | Description |
+|-------|------|--------|-------------|
+| `id` | string | `US-###` | Unique story identifier |
+| `title` | string | - | Short descriptive title |
+| `description` | string | - | User story in "As a...I want...so that" format |
+| `acceptanceCriteria` | array | - | List of verifiable criteria |
+| `priority` | number | 1, 2, 3... | Execution order (dependencies first) |
+| `passes` | boolean | true/false | Whether story is complete |
+| `status` | string | `pending`, `blocked`, `passed` | Rich state information |
+| `attempts` | number | 0+ | How many iterations attempted this story |
+| `notes` | string | - | Additional context or blockers |
+| `blockedReason` | string (optional) | - | Why story is blocked (only on blocked stories) |
+
+### Story Status Flow
 
 ```
-Search transcripts for story US-003
-Search transcripts from 2026-01-15 to 2026-01-17
-Search transcripts for branch ralph/auth-system
-Read transcript from iteration 5
+pending → (attempted) → passed
+   ↓
+blocked (after multiple failures)
+```
+
+### Acceptance Criteria Guidelines
+
+**Good (verifiable):**
+- "Add `priority` column to tasks table with values 'high', 'medium', 'low'"
+- "Filter dropdown shows options: All, High, Medium, Low"
+- "Clicking delete shows confirmation dialog"
+- "Typecheck passes"
+
+**Bad (vague):**
+- "Works correctly"
+- "Good UX"
+- "Handles edge cases"
+
+**Required criteria:**
+- Every story: `"Typecheck passes"`
+- UI stories: `"Verify in browser using dev-browser skill"`
+
+### Migration Tool
+
+Migrate existing prd.json files to the new format with status/attempts fields:
+
+```bash
+./.angainor/scripts/migrate-prd.sh prd.json
+```
+
+---
+
+## Configuration
+
+### Claude Code Settings
+
+The installer automatically configures `.claude/settings.json`:
+
+```json
+{
+  "skills": [".angainor/skills"]
+}
+```
+
+### Git Ignore
+
+The installer adds these entries to `.gitignore`:
+
+```gitignore
+# Angainor generated files
+prd.json
+progress.txt
+.last-branch
+transcripts/
+screenshots/
+metrics.json
+```
+
+### Directory Structure
+
+After installation:
+
+```
+your-project/
+├── .angainor/                    # Angainor internals (commit this)
+│   ├── angainor.sh              # Main loop script
+│   ├── prompt.md                # Agent instructions
+│   ├── prd.json.example         # Format reference
+│   ├── skills/                  # Claude Code skills
+│   │   ├── prd/
+│   │   ├── angainor/
+│   │   └── read-transcript/
+│   └── scripts/
+│       └── migrate-prd.sh
+├── angainor.sh                   # Wrapper script (commit this)
+├── prd.json                      # Current PRD (generated, ignored)
+├── progress.txt                  # Learning log (generated, ignored)
+├── transcripts/                  # Iteration logs (generated, ignored)
+├── screenshots/                  # Browser verification (generated, ignored)
+├── metrics.json                  # Performance data (generated, ignored)
+└── archive/                      # Previous runs (generated, optional commit)
 ```
 
 ---
@@ -255,23 +665,81 @@ cat transcripts/index.json | jq '.transcripts[]'
 cat prd.json | jq '[.userStories[] | select(.passes == true)] | length'
 ```
 
-### Common Issues
+---
 
-**Story keeps failing:**
-1. Story too large → Split it
-2. Unclear acceptance criteria → Clarify in prd.json
-3. Missing dependency → Add earlier story or update progress.txt
+## Troubleshooting
 
-**Quality checks failing:**
+### Claude API Errors
+
+**Problem:** Transient API errors (ECONNRESET, rate limits, 503)
+
+**Solution:** Angainor automatically retries with exponential backoff (max 3 attempts). If persistent, check:
+- Claude Code authentication: `claude auth status`
+- Network connectivity
+- API rate limits (wait and retry)
+
+### Verification Failures
+
+**Problem:** `⚠ VERIFICATION ENFORCEMENT FAILED - Missing verification`
+
+**Solution:** Angainor requires verification evidence. Check:
+- Are `<verification>` XML blocks present in the output?
+- OR are `✅` checkmarks present?
+- Did the iteration complete before outputting verification?
+
+The iteration will retry automatically.
+
+### Story Never Completes
+
+**Problem:** Story attempted multiple times but never passes
+
+**Common causes:**
+1. **Too large** - Split into smaller stories
+2. **Missing dependencies** - Earlier story needs to complete first
+3. **Flaky tests** - Fix test infrastructure
+4. **Unclear criteria** - Acceptance criteria too vague
+
+**Solution:**
+1. Check `progress.txt` for attempt history
+2. Read transcripts with `/read-transcript` for detailed context
+3. Update prd.json to mark story as `blocked` if unsolvable
+4. Split story or clarify acceptance criteria
+
+### Branch Mismatch
+
+**Problem:** Angainor creates commits on wrong branch
+
+**Solution:** Ensure `branchName` in prd.json is correct. Angainor checks out/creates this branch automatically. If wrong:
+1. Update `branchName` in prd.json
+2. Manually checkout correct branch
+3. Re-run Angainor
+
+### Missing Skills
+
+**Problem:** `/prd`, `/angainor`, or `/read-transcript` not found
+
+**Solution:** Check Claude Code skills configuration:
+
 ```bash
-npx tsc --noEmit  # Run manually
-npm test
-git diff          # Check changes
+cat .claude/settings.json
+# Should include: {"skills": [".angainor/skills"]}
 ```
 
-**Ralph reached max iterations:**
+If missing, re-run installer or manually add to settings.
+
+### Metrics Not Recording
+
+**Problem:** `metrics.json` empty or not updating
+
+**Solution:** Check:
+1. File permissions on `metrics.json`
+2. `jq` installed and in PATH
+3. Iteration completed successfully (not interrupted)
+
+Initialize manually if needed:
+
 ```bash
-./ralph.sh 30     # Increase limit and resume
+echo '{"iterations": []}' > metrics.json
 ```
 
 ### Manual Intervention
@@ -289,79 +757,97 @@ cat >> progress.txt << 'EOF'
 EOF
 
 # Resume
-./ralph.sh 10
+./angainor.sh 10
 ```
 
 ---
 
-## Archiving
+## Flowchart Visualization
 
-Ralph auto-archives when `branchName` changes between runs:
+Interactive React Flow diagram showing the Angainor execution flow.
 
-```
-archive/
-  2026-01-17-task-priority/
-    prd.json
-    progress.txt
-    transcripts/
-```
+### Setup
 
-**Manual archive:**
 ```bash
-DATE=$(date +%Y-%m-%d)
-BRANCH=$(jq -r '.branchName' prd.json | sed 's|^ralph/||')
-mkdir -p archive/$DATE-$BRANCH
-cp prd.json progress.txt archive/$DATE-$BRANCH/
-cp -r transcripts archive/$DATE-$BRANCH/
+cd flowchart
+npm install
+npm run dev       # Development server
+npm run build     # Production build
+npm run lint      # ESLint check
 ```
 
-**Restore:**
-```bash
-cp archive/2026-01-17-feature/prd.json .
-cp archive/2026-01-17-feature/progress.txt .
-cp -r archive/2026-01-17-feature/transcripts .
-./ralph.sh 10
-```
+### Technology Stack
+
+- **React 19** - Latest React with modern features
+- **TypeScript** - Type safety
+- **Vite** - Fast build tooling
+- **React Flow** - Interactive flowchart rendering
+
+### Features
+
+- Interactive node exploration
+- Zoom and pan controls
+- Color-coded nodes by category (input, process, decision, output)
+- Responsive design
 
 ---
 
-## Customization
+## Examples
 
-### Quality Gates (prompt.md)
+### Example 1: Simple Feature (Task Priority)
 
-```markdown
-## Quality Requirements
-- Typecheck: `npx tsc --noEmit`
-- Tests: `npm test`
-- Lint: `npm run lint`
-- Build: `npm run build`
-```
-
-**Language-specific:**
-```bash
-# Python
-python -m pytest && python -m mypy .
-
-# Go
-go test ./... && go build ./...
-
-# Rust
-cargo test && cargo clippy
-```
-
-### Custom Skills
+**Run Angainor:**
 
 ```bash
-mkdir -p ~/.claude/skills/my-skill
-cat > ~/.claude/skills/my-skill/SKILL.md << 'EOF'
----
-name: my-skill
-description: "Custom skill for [purpose]"
----
-# My Skill
-[Instructions]
-EOF
+./angainor.sh 5
 ```
+
+**Iteration 1 output:**
+
+```
+═══════════════════════════════════════════════════════
+  Angainor Iteration 1 of 5
+═══════════════════════════════════════════════════════
+  Calling Claude API (attempt 1/3)...
+
+[Claude implements US-001, creates migration, runs typecheck]
+
+## Verification
+
+✅ Add priority column - migration created, column added with enum type
+✅ Generate and run migration - `npm run db:migrate` succeeded
+✅ Typecheck passes - ran npm run typecheck, exit 0
+
+Iteration 1 complete. Continuing...
+```
+
+**Result:**
+- Story US-001 marked `passes: true`
+- Git commit: `feat: US-001 - Add priority field to database`
+- Learning logged to `progress.txt`
+- Transcript saved to `transcripts/2026-01-20-14-30-00-iteration-1.txt`
+
+### Example 2: Blocked Story Handling
+
+**Story US-005 encounters an issue:**
+
+```json
+{
+  "id": "US-005",
+  "title": "Real-time notifications",
+  "status": "blocked",
+  "attempts": 3,
+  "blockedReason": "WebSocket integration requires infrastructure not in scope",
+  "notes": "Needs separate infrastructure story"
+}
+```
+
+**Angainor behavior:**
+1. Attempts story 3 times
+2. Marks as `blocked` after repeated failures
+3. Documents blocker in `blockedReason`
+4. Moves to next story (doesn't waste context)
+5. Human can review and either fix blocker or split story
 
 ---
 
@@ -369,48 +855,54 @@ EOF
 
 | File | Purpose | Modified By |
 |------|---------|-------------|
-| `ralph.sh` | Main loop spawning Claude instances | Human (rarely) |
-| `prompt.md` | Instructions for each iteration | Human (customize) |
-| `prd.json` | User stories with status | Ralph |
-| `progress.txt` | Append-only learnings | Ralph |
-| `transcripts/` | Full iteration logs | Ralph |
-| `transcripts/index.json` | Searchable transcript index | Ralph |
-| `archive/` | Previous Ralph runs | Ralph |
+| `.angainor/angainor.sh` | Main loop spawning Claude instances | Human (rarely) |
+| `.angainor/prompt.md` | Instructions for each iteration | Human (customize) |
+| `angainor.sh` | Wrapper script | Generated by installer |
+| `prd.json` | User stories with status | Angainor |
+| `progress.txt` | Append-only learnings | Angainor |
+| `transcripts/` | Full iteration logs | Angainor |
+| `transcripts/index.json` | Searchable transcript index | Angainor |
+| `metrics.json` | Performance metrics | Angainor |
+| `archive/` | Previous Angainor runs | Angainor |
+| `.claude/settings.json` | Skills configuration | Installer |
 
 ---
 
-## Flowchart Development
+## Contributing
 
-The interactive flowchart is a React Flow application:
+Contributions welcome! Areas of interest:
 
-```bash
-cd flowchart
-npm install
-npm run dev      # Development server
-npm run build    # Production build
-npm run lint     # Lint check
-```
-
-Deploys automatically to GitHub Pages on push to main.
-
----
-
-## References
-
-- [Geoffrey Huntley's Ralph](https://ghuntley.com/ralph/) — Original pattern
-- [Claude Code Docs](https://docs.anthropic.com/en/docs/claude-code) — CLI reference
-- [Interactive Flowchart](https://snarktank.github.io/ralph/) — Visual guide
-- [prd.json.example](prd.json.example) — Example PRD format
+- Additional skills for common workflows
+- Improved error recovery strategies
+- Better visualization tools
+- Integration with other AI coding tools
 
 ---
 
 ## License
 
-MIT License
+MIT License - See LICENSE file for details.
 
 ---
 
 ## Acknowledgments
 
-- **Geoffrey Huntley** — Original Ralph pattern
-- **Anthropic** — Claude Code platform
+Based on the [Ralph pattern](https://ghuntley.com/ralph/) by [Geoffrey Huntley](https://ghuntley.com).
+
+Skill extraction inspired by [Claudeception](https://github.com/blader/Claudeception) by [blader](https://github.com/blader).
+
+Special thanks to the Claude Code team at Anthropic for building an excellent autonomous agent platform.
+
+---
+
+## Links
+
+- **GitHub**: https://github.com/thepriceisright/angainor
+- **Ralph Pattern**: https://ghuntley.com/ralph/
+- **Claudeception**: https://github.com/blader/Claudeception
+- **Claude Code**: https://claude.ai/code
+- **Interactive Flowchart**: https://thepriceisright.github.io/angainor/
+
+---
+
+**Built with Claude Code • Powered by Anthropic's Claude**
