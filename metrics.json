@@ -59,6 +59,86 @@
       "files_changed": 1,
       "estimated_tokens": 20,
       "failure_reason": ""
+    },
+    {
+      "timestamp": "2026-01-20-11-35-52",
+      "duration_seconds": 167,
+      "story_id": "US-001",
+      "status": "success",
+      "lines_changed": 47,
+      "files_changed": 1,
+      "estimated_tokens": 85,
+      "failure_reason": ""
+    },
+    {
+      "timestamp": "2026-01-20-11-38-41",
+      "duration_seconds": 163,
+      "story_id": "US-003",
+      "status": "success",
+      "lines_changed": 106,
+      "files_changed": 2,
+      "estimated_tokens": 36,
+      "failure_reason": ""
+    },
+    {
+      "timestamp": "2026-01-20-11-41-26",
+      "duration_seconds": 207,
+      "story_id": "US-003",
+      "status": "success",
+      "lines_changed": 116,
+      "files_changed": 2,
+      "estimated_tokens": 111,
+      "failure_reason": ""
+    },
+    {
+      "timestamp": "2026-01-20-11-44-55",
+      "duration_seconds": 118,
+      "story_id": "US-005",
+      "status": "success",
+      "lines_changed": 247,
+      "files_changed": 3,
+      "estimated_tokens": 44,
+      "failure_reason": ""
+    },
+    {
+      "timestamp": "2026-01-20-11-46-55",
+      "duration_seconds": 278,
+      "story_id": "US-005",
+      "status": "success",
+      "lines_changed": 478,
+      "files_changed": 4,
+      "estimated_tokens": 37,
+      "failure_reason": ""
+    },
+    {
+      "timestamp": "2026-01-20-11-51-35",
+      "duration_seconds": 331,
+      "story_id": "US-007",
+      "status": "success",
+      "lines_changed": 386,
+      "files_changed": 4,
+      "estimated_tokens": 39,
+      "failure_reason": ""
+    },
+    {
+      "timestamp": "2026-01-20-11-58-01",
+      "duration_seconds": 130,
+      "story_id": "US-008",
+      "status": "success",
+      "lines_changed": 80,
+      "files_changed": 3,
+      "estimated_tokens": 46,
+      "failure_reason": ""
+    },
+    {
+      "timestamp": "2026-01-20-12-00-13",
+      "duration_seconds": 305,
+      "story_id": "",
+      "status": "success",
+      "lines_changed": 92,
+      "files_changed": 3,
+      "estimated_tokens": 22,
+      "failure_reason": ""
     }
   ]
 }
