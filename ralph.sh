@@ -14,6 +14,38 @@ TRANSCRIPT_DIR="$SCRIPT_DIR/transcripts"
 TRANSCRIPT_INDEX="$TRANSCRIPT_DIR/index.json"
 METRICS_FILE="$SCRIPT_DIR/metrics.json"
 
+# Plugins to disable during Ralph runs (interfering with autonomous execution)
+RALPH_DISABLE_PLUGINS=(
+  "automatic-code-review@claude-skillz"
+  "explanatory-output-style@claude-plugins-official"
+)
+
+# Configure Ralph profile by disabling interfering plugins
+configure_ralph_profile() {
+  echo "Configuring Ralph profile (disabling interfering plugins)..."
+  for plugin in "${RALPH_DISABLE_PLUGINS[@]}"; do
+    if claude plugin disable "$plugin" 2>/dev/null; then
+      echo "  Disabled: $plugin"
+    else
+      # Plugin might not be installed - that's fine
+      echo "  Skipped (not installed): $plugin"
+    fi
+  done
+}
+
+# Restore plugins to their original state
+restore_plugins() {
+  echo "Restoring plugins..."
+  for plugin in "${RALPH_DISABLE_PLUGINS[@]}"; do
+    if claude plugin enable "$plugin" 2>/dev/null; then
+      echo "  Enabled: $plugin"
+    else
+      # Plugin might not be installed - that's fine
+      echo "  Skipped (not installed): $plugin"
+    fi
+  done
+}
+
 # Print metrics summary on loop completion
 print_metrics_summary() {
   if [ ! -f "$METRICS_FILE" ] || [ ! -s "$METRICS_FILE" ]; then
