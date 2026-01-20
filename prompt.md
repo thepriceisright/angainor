@@ -199,6 +199,24 @@ Conclusion: SATISFIED
 
 Prefer `browser_snapshot` for element detection; use `browser_take_screenshot` when visual appearance matters.
 
+## Test Stories
+
+When a story requires writing tests:
+
+1. **Detect Framework**: Check `package.json` for `vitest` or `jest`. Run `npm test` to verify.
+2. **File Naming**: `foo.ts` → `foo.test.ts` (or `.spec.ts` if project convention).
+3. **Mock Dependencies**: Use `vi.mock()` (Vitest) or `jest.mock()` (Jest) for external APIs/databases.
+4. **Follow Patterns**: Check existing tests for setup files, fixtures, and conventions.
+
+**Verification must include test output:**
+```
+<verification>
+Criterion: Unit tests pass
+Evidence: Ran `npm test` - "Tests: 5 passed, 5 total"
+Conclusion: SATISFIED
+</verification>
+```
+
 ## Before Running Git Commit
 
 Pause before committing. Ask yourself:
