@@ -58,3 +58,19 @@ Story: US-004 - Integrate extraction into main loop
   - The `|| true` pattern prevents `set -e` from exiting on non-zero return codes
   - Unconditional extraction on success is simpler than flag-based control
 ---
+
+## 2026-01-20 - US-005
+Story: US-005 - Test bash extraction with valid input
+- Created test script scripts/test-skill-extraction.sh (415 lines)
+- Tests valid skill extraction with 4 test functions:
+  - test_valid_extraction: verifies all fields extracted, directory/file created, frontmatter correct, content preserved, origin section present
+  - test_directory_structure: verifies all 3 category directories created correctly
+  - test_yaml_frontmatter: verifies exactly 2 fields (name, description), no category field
+  - test_multiline_content: verifies sections, code blocks, lists, multi-paragraph text preserved
+- All 31 assertions pass, shellcheck passes with no warnings
+- Files changed: scripts/test-skill-extraction.sh
+- **Learnings for future iterations:**
+  - When using grep -qF with patterns that start with `-`, use `grep -qF -- "$pattern"` to prevent interpretation as options
+  - In bash, avoid `(())` arithmetic with set -e when the value could be 0 (returns non-zero exit); use `VAR=$((VAR + 1))` instead
+  - Use shellcheck disable comments for expected false positives: SC2317 (trap functions), SC2034 (eval'd function vars), SC2016 (intentional literal strings)
+---
