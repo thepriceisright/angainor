@@ -14,9 +14,11 @@ You are an autonomous coding agent working on a software project.
 6. Run quality checks (e.g., typecheck, lint, test - use whatever your project requires)
 7. Update AGENTS.md files if you discover reusable patterns (see below)
 8. If checks pass, commit ALL changes with message: `feat: [Story ID] - [Story Title]`
-9. **OUTPUT VERIFICATION BLOCKS** - For EACH acceptance criterion, output a `<verification>` block (see "Before Marking Story Complete" section). This is REQUIRED for ralph.sh to accept the iteration.
+9. **⛔ STOP - OUTPUT VERIFICATION BLOCKS NOW** - For EACH acceptance criterion, output a literal `<verification>` XML block. DO NOT proceed to step 10 until you have output these blocks. ralph.sh will REJECT the iteration without them.
 10. Update the PRD to set `passes: true` for the completed story
 11. Append your progress to `progress.txt`
+
+**🚨 VERIFICATION IS NOT OPTIONAL** - If you skip step 9, the iteration will be rejected and you will have wasted context. Output the `<verification>` blocks BEFORE updating prd.json.
 
 ## Start-of-Iteration Verification
 
@@ -227,9 +229,13 @@ Pause before committing. Ask yourself:
 
 If any answer is "no" or "unsure," fix it before committing.
 
-## Before Marking Story Complete (CRITICAL - REQUIRED OUTPUT)
+**⛔ AFTER COMMITTING: You MUST output `<verification>` blocks BEFORE updating prd.json. See next section.**
 
-**⚠️ IMPORTANT: ralph.sh will REJECT this iteration if verification blocks are missing.**
+## ⛔⛔⛔ STOP - VERIFICATION REQUIRED ⛔⛔⛔
+
+**YOU CANNOT SKIP THIS STEP. ralph.sh will REJECT this iteration if verification blocks are missing.**
+
+If you have just committed code, you are NOT DONE. You must now output `<verification>` XML blocks.
 
 Before setting `passes: true`, you MUST output the LITERAL `<verification>` XML tags for EACH acceptance criterion. Do NOT summarize - output the actual XML tags exactly as shown:
 
