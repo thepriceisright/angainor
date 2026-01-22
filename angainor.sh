@@ -240,7 +240,7 @@ $content
 
 ## Origin
 
-- Extracted: $(date -Iseconds)
+- Extracted: $(date -u +"%Y-%m-%dT%H:%M:%SZ")
 - Project: $project_name
 - Story: $story_id
 EOF
@@ -339,11 +339,24 @@ for i in $(seq 1 $MAX_ITERATIONS); do
     echo "  Calling Claude API (attempt $retry/$MAX_RETRIES)..."
 
     # Run Claude with timeout protection to prevent hangs on crashed processes
-    OUTPUT=$(timeout --signal=KILL $CLAUDE_TIMEOUT claude --dangerously-skip-permissions --print < "$SCRIPT_DIR/prompt.md" 2>&1 | tee /dev/stderr "$TRANSCRIPT_FILE") || true
+    # Use gtimeout on macOS (from coreutils), timeout on Linux, or no timeout as fallback
+    if command -v gtimeout &> /dev/null; then
+      TIMEOUT_CMD="gtimeout --signal=KILL $CLAUDE_TIMEOUT"
+    elif command -v timeout &> /dev/null; then
+      TIMEOUT_CMD="timeout --signal=KILL $CLAUDE_TIMEOUT"
+    else
+      TIMEOUT_CMD=""  # No timeout available, run without
+    fi
+
+    if [ -n "$TIMEOUT_CMD" ]; then
+      OUTPUT=$($TIMEOUT_CMD claude --dangerously-skip-permissions --print < "$SCRIPT_DIR/prompt.md" 2>&1 | tee /dev/stderr "$TRANSCRIPT_FILE") || true
+    else
+      OUTPUT=$(claude --dangerously-skip-permissions --print < "$SCRIPT_DIR/prompt.md" 2>&1 | tee /dev/stderr "$TRANSCRIPT_FILE") || true
+    fi
     CLAUDE_EXIT_CODE=$?
 
-    # Check for timeout (exit code 137 = killed by SIGKILL after timeout)
-    if [ "$CLAUDE_EXIT_CODE" -eq 137 ] || [ "$CLAUDE_EXIT_CODE" -eq 124 ]; then
+    # Check for timeout (exit code 137 = killed by SIGKILL, 124 = timeout exit code)
+    if [ -n "$TIMEOUT_CMD" ] && { [ "$CLAUDE_EXIT_CODE" -eq 137 ] || [ "$CLAUDE_EXIT_CODE" -eq 124 ]; }; then
       echo ""
       echo "  ⚠ Claude process timed out after ${CLAUDE_TIMEOUT}s (attempt $retry/$MAX_RETRIES)"
       if [ "$retry" -lt "$MAX_RETRIES" ]; then
@@ -424,9 +437,10 @@ Branch: $CURRENT_BRANCH
 EOF
 
   # Extract story ID from output (looks for "feat: US-001" or similar patterns)
-  STORY_ID=$(echo "$OUTPUT" | grep -oP 'feat: \K[A-Za-z]+-\d+' | head -1 || echo "")
+  # Use sed instead of grep -P for macOS compatibility
+  STORY_ID=$(echo "$OUTPUT" | grep -o 'feat: [A-Za-z]*-[0-9]*' | head -1 | sed 's/feat: //' || echo "")
   if [ -z "$STORY_ID" ]; then
-    STORY_ID=$(echo "$OUTPUT" | grep -oP '\b[A-Z]+-\d+\b' | head -1 || echo "unknown")
+    STORY_ID=$(echo "$OUTPUT" | grep -oE '[A-Z]+-[0-9]+' | head -1 || echo "unknown")
   fi
 
   # Update transcript index
