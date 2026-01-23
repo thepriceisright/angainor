@@ -178,50 +178,193 @@ F. Other: [please specify]
 
 ## Step 2: Verification Approach
 
-Based on the answers, propose how success will be measured.
+Based on the answers, propose how success will be measured. **Adapt your proposals based on the objective type from Step 1.**
 
-### Propose Verification Command
+### Type-Specific Verification Commands
+
+Propose a verification command tailored to the objective type:
+
+#### For Performance Objectives (Type A)
 
 ```markdown
 ## Proposed Verification
 
-**Command:** `[the command to run]`
+**Command:** `python scripts/benchmark_performance.py --endpoint [endpoint] --iterations 100`
 
-Examples:
-- Performance: `python scripts/benchmark_latency.py --endpoint /api/process`
-- Accuracy: `python scripts/evaluate_model.py --dataset validation`
-- Coverage: `pytest --cov=src --cov-report=json`
-- Quality: `./scripts/quality_metrics.sh`
+This command will:
+- Run [N] iterations of the target operation
+- Measure: latency (p50, p95, p99), throughput (req/sec), memory usage
+- Output JSON metrics for tracking
 
-**Does this command exist?**
-- Yes, it exists and works
-- No, please create it for me
-- I need to modify an existing script
+**Does this benchmark script exist?**
+A. Yes, I have an existing benchmark at: [path]
+B. No, please create a benchmark script for me (Recommended)
+C. I'll use a standard tool (pytest-benchmark, hyperfine, wrk)
+D. I need to modify an existing script: [path]
+```
+
+#### For Accuracy Objectives (Type B)
+
+```markdown
+## Proposed Verification
+
+**Command:** `python scripts/evaluate_model.py --dataset validation --output-json`
+
+This command will:
+- Load the model and validation dataset
+- Run predictions on [N] samples
+- Calculate: accuracy, precision, recall, F1-score
+- Output JSON metrics for tracking
+
+**Does this evaluation script exist?**
+A. Yes, I have an existing evaluation at: [path]
+B. No, please create an evaluation script for me (Recommended)
+C. I'll use a standard tool (sklearn metrics, pytest with assertions)
+D. I need to modify an existing script: [path]
+```
+
+#### For Coverage Objectives (Type C)
+
+```markdown
+## Proposed Verification
+
+**Command:** `pytest --cov=[source_dir] --cov-report=json --cov-report=term`
+
+This command will:
+- Run the test suite with coverage tracking
+- Measure: line coverage, branch coverage, missing lines
+- Output coverage.json for metric extraction
+
+**Is your coverage tooling configured?**
+A. Yes, pytest-cov is set up and working
+B. No, please help me set up coverage (Recommended)
+C. I use a different coverage tool: [specify]
+D. I need to configure coverage for specific modules
+```
+
+#### For Quality Objectives (Type D)
+
+```markdown
+## Proposed Verification
+
+**Command:** `./scripts/quality_metrics.sh`
+
+This script will aggregate:
+- Linting violations (ruff, eslint)
+- Type coverage (pyright, tsc)
+- Complexity metrics (radon, complexity-report)
+
+**Do you have quality metric tooling?**
+A. Yes, I have existing quality scripts at: [path]
+B. No, please create a quality metrics script for me (Recommended)
+C. I want to use specific tools: [list tools]
+D. I only care about: [specific metric]
+```
+
+### Offer to Create Benchmark Scripts
+
+If user selects "create for me" (option B), acknowledge this:
+
+```markdown
+**Benchmark Creation Plan:**
+
+I'll create `scripts/benchmark_[type].py` that:
+1. [Specific action for this objective type]
+2. Outputs JSON with metrics: [list metrics]
+3. Can be run with: `python scripts/benchmark_[type].py`
+
+This will be created as part of the first iteration.
+
+Proceed with benchmark creation? (yes/adjust/no)
 ```
 
 ### Propose Success Criteria
 
+Based on the objective type and target value from Step 1:
+
 ```markdown
-**Success Criteria:** `[metric expression]`
+**Success Criteria:** `[metric] [operator] [value]`
 
-Examples:
-- `accuracy >= 0.90`
-- `latency_p99 < 100`
-- `coverage >= 80`
-- `error_rate < 0.01`
+```
 
-Is this target realistic? (Y/N/Adjust to: ___)
+Type-specific examples:
+- **Performance:** `latency_p99 < 100` (milliseconds)
+- **Accuracy:** `accuracy >= 0.90` (0-1 scale)
+- **Coverage:** `line_coverage >= 80` (percentage)
+- **Quality:** `linting_violations < 10` (count)
+
+```markdown
+Is this target realistic based on your current state?
+
+A. Yes, this target is achievable
+B. Too aggressive - adjust to: [suggest lower target]
+C. Too conservative - adjust to: [suggest higher target]
+D. I want a different metric entirely: [specify]
 ```
 
 ### Propose Metrics to Track
 
-```markdown
-**Metrics to Track:**
-1. [Primary metric from success criteria]
-2. [Related metric 1]
-3. [Related metric 2]
+Propose metrics relevant to the objective type. The primary metric must match the success criteria.
 
-Add or remove metrics? (List any changes)
+#### Performance Metrics (Type A)
+```markdown
+**Recommended Metrics to Track:**
+1. `latency_p99` (primary) - 99th percentile response time
+2. `latency_p50` - Median response time
+3. `throughput` - Requests per second
+4. `memory_mb` - Peak memory usage
+
+Add, remove, or reorder? (List changes or 'OK')
+```
+
+#### Accuracy Metrics (Type B)
+```markdown
+**Recommended Metrics to Track:**
+1. `accuracy` (primary) - Overall correct predictions
+2. `precision` - True positives / predicted positives
+3. `recall` - True positives / actual positives
+4. `f1_score` - Harmonic mean of precision and recall
+
+Add, remove, or reorder? (List changes or 'OK')
+```
+
+#### Coverage Metrics (Type C)
+```markdown
+**Recommended Metrics to Track:**
+1. `line_coverage` (primary) - Percentage of lines covered
+2. `branch_coverage` - Percentage of branches covered
+3. `missing_lines` - Count of uncovered lines
+4. `files_covered` - Number of files with any coverage
+
+Add, remove, or reorder? (List changes or 'OK')
+```
+
+#### Quality Metrics (Type D)
+```markdown
+**Recommended Metrics to Track:**
+1. `linting_violations` (primary) - Total lint errors
+2. `type_coverage` - Percentage of typed code
+3. `cyclomatic_complexity` - Average function complexity
+4. `tech_debt_hours` - Estimated remediation time
+
+Add, remove, or reorder? (List changes or 'OK')
+```
+
+### User Adjustment Summary
+
+After proposing verification approach, present a summary the user can adjust:
+
+```markdown
+## Verification Proposal Summary
+
+| Aspect | Proposed Value | Adjust? |
+|--------|---------------|---------|
+| Command | `[command]` | A. Keep / B. Change to: ___ |
+| Create benchmark? | [Yes/No] | A. Keep / B. Change |
+| Success criteria | `[expression]` | A. Keep / B. Change to: ___ |
+| Metrics to track | [list] | A. Keep / B. Add: ___ / C. Remove: ___ |
+
+Enter adjustments (e.g., "B. Change command to pytest") or 'OK' to proceed to Step 3.
 ```
 
 ---
