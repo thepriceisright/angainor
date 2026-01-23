@@ -511,30 +511,73 @@ If user asks "explain more", provide the plain language explanation above.
 
 ## Step 4: Generate objective.json
 
-Present the complete plan for approval:
+**CRITICAL:** Present the complete plan and wait for user approval BEFORE writing any files. Do NOT create objective.json until the user explicitly approves.
+
+### Present the Complete Plan Summary
 
 ```markdown
-## Summary
+## Complete Plan Summary
 
-**Objective:** [description]
-**Target:** [success criteria]
-**Verification:** `[command]`
+**Objective:** [description from Step 1]
+**Target:** [success criteria from Step 2]
+**Verification:** `[command from Step 2]`
 
 **Constraints:**
 - [constraint 1]
 - [constraint 2]
+- (or "None specified" if no constraints)
 
 **Stopping Conditions:**
 - Max iterations: [N]
 - Plateau: [metric] improving < [threshold] over [window] iterations
-- Max failures: [N]
+- Max consecutive failures: [N]
+
+**Metrics to track:** [list from Step 2]
 
 ---
 
 Ready to create objective.json? (yes/no/adjust)
 ```
 
-Only after explicit approval ("yes", "y", "create it", etc.), write the file:
+### Handling User Responses
+
+**On "adjust" or similar ("change", "modify", "fix"):**
+```
+What would you like to adjust?
+
+A. Objective description or constraints
+B. Verification command or success criteria
+C. Stopping conditions (iterations, plateau, failures)
+D. Metrics to track
+
+Enter your choice, or describe what you want to change:
+```
+
+After user specifies adjustments:
+1. Make the requested changes
+2. Re-present the Complete Plan Summary
+3. Ask for approval again
+
+**On "no" or similar ("cancel", "stop", "never mind"):**
+```
+Objective creation cancelled. No files were created.
+
+You can restart with /objective when you're ready.
+```
+
+**On explicit approval - ONLY these trigger file creation:**
+- "yes", "y"
+- "create it", "create"
+- "generate", "generate it"
+- "do it", "go ahead"
+- "looks good", "lgtm"
+- "approved", "approve"
+
+Any other response should be treated as a request for adjustment or clarification.
+
+### Write objective.json After Approval
+
+Only after receiving explicit approval, write the file to project root:
 
 ```json
 {
@@ -573,22 +616,24 @@ Only after explicit approval ("yes", "y", "create it", etc.), write the file:
 
 ## After Approval
 
-Print next steps:
+Print confirmation and next steps in this EXACT format:
 
 ```
-objective.json created successfully!
+✅ objective.json created successfully!
 
 Next steps:
 1. Review the generated objective.json
 2. Ensure the verification command works: [command]
-3. Start autonomous iteration: ./angainor.sh --objective [max_iterations]
+3. To start: ./angainor.sh --objective
 
 The agent will iterate autonomously, trying different approaches until:
-- Success criteria are met
-- Progress plateaus
-- Max iterations reached
-- The objective is determined impossible
+- ✓ Success criteria are met
+- ⏸ Progress plateaus (no improvement in consecutive iterations)
+- ⏱ Max iterations reached
+- ✗ The objective is determined impossible
 ```
+
+**Note:** The `./angainor.sh --objective` command uses the maxIterations from the objective.json by default. Users can override with: `./angainor.sh --objective 20`
 
 ---
 
