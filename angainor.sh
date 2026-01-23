@@ -347,6 +347,67 @@ check_objective_success() {
   return 0
 }
 
+# Check for IMPOSSIBLE termination in Objective mode
+# Arguments: output_text
+# Returns: 0 if IMPOSSIBLE found (and state updated), 1 otherwise
+check_objective_impossible() {
+  local output="$1"
+
+  # Only run in objective mode
+  if [ "$MODE" != "objective" ]; then
+    return 1
+  fi
+
+  # Check for <objective>IMPOSSIBLE</objective> signal
+  if ! echo "$output" | grep -qE "^[[:space:]]*<objective>IMPOSSIBLE</objective>[[:space:]]*$"; then
+    return 1
+  fi
+
+  # Extract reason from <reason>...</reason> block
+  local reason=""
+  if echo "$output" | grep -q "<reason>"; then
+    reason=$(echo "$output" | sed -n '/<reason>/,/<\/reason>/p' | sed '1d;$d' | tr '\n' ' ' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+  fi
+
+  # Extract category from <category>...</category> block (technical|scope|resource)
+  local category=""
+  if echo "$output" | grep -q "<category>"; then
+    category=$(echo "$output" | sed -n '/<category>/,/<\/category>/p' | sed '1d;$d' | tr -d '\n' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+  fi
+
+  echo ""
+  echo "═══════════════════════════════════════════════════════"
+  echo "  OBJECTIVE IMPOSSIBLE"
+  echo "═══════════════════════════════════════════════════════"
+
+  # Print reason and category if available
+  if [ -n "$category" ]; then
+    echo "  Category: $category"
+  fi
+  if [ -n "$reason" ]; then
+    echo "  Reason: $reason"
+  fi
+
+  # Update objective.json status to 'impossible' and store reason
+  if [ -f "$CONFIG_FILE" ]; then
+    local iterations
+    iterations=$(jq -r '.status.iterations // 0' "$CONFIG_FILE")
+
+    # Build jq expression based on available fields
+    if [ -n "$reason" ]; then
+      jq --arg reason "$reason" '.status.state = "impossible" | .status.impossibleReason = $reason' "$CONFIG_FILE" > "$CONFIG_FILE.tmp" && mv "$CONFIG_FILE.tmp" "$CONFIG_FILE"
+    else
+      jq '.status.state = "impossible"' "$CONFIG_FILE" > "$CONFIG_FILE.tmp" && mv "$CONFIG_FILE.tmp" "$CONFIG_FILE"
+    fi
+
+    echo "  Completed after $iterations iteration(s)"
+  fi
+
+  echo "═══════════════════════════════════════════════════════"
+
+  return 0
+}
+
 # Update objective.json with iteration metrics (Objective mode only)
 # Arguments: iteration_number metrics_json
 # Returns: 0 on success, 1 on failure
@@ -808,6 +869,13 @@ EOF
       record_metrics "success" "OBJECTIVE_SUCCESS" ""
       print_metrics_summary
       exit 0
+    fi
+
+    # Check for IMPOSSIBLE termination signal
+    if check_objective_impossible "$OUTPUT"; then
+      record_metrics "blocked" "OBJECTIVE_IMPOSSIBLE" "Agent determined objective is impossible"
+      print_metrics_summary
+      exit 2
     fi
   fi
 
