@@ -120,3 +120,18 @@ Story: US-008 - Implement IMPOSSIBLE termination check
   - Use consistent exit codes: 0=SUCCESS, 2=IMPOSSIBLE (3 and 4 reserved for PLATEAU and MAX_ITERATIONS)
   - Extract multiline XML blocks with sed, collapse newlines with tr '\n' ' ' for single-line output
 ---
+
+## 2026-01-23 - US-009
+Story: US-009 - Implement PLATEAU termination check (agent-signaled)
+- Created check_objective_plateau() function following established termination check pattern
+- Uses anchored grep pattern for XML signal detection: ^[[:space:]]*<objective>PLATEAU</objective>[[:space:]]*$
+- Extracts <attempts> and <suggestion> blocks using sed -n '/<tag>/,/<\/tag>/p' pattern
+- Updates objective.json: status.state = "plateau"
+- Prints banner with "OBJECTIVE PLATEAU - Diminishing Returns Detected", attempts, and suggestion
+- Integrated into main loop after IMPOSSIBLE check, exits with code 3
+- Files changed: angainor.sh
+- **Learnings for future iterations:**
+  - Exit codes are now: 0=SUCCESS, 2=IMPOSSIBLE, 3=PLATEAU (4 reserved for MAX_ITERATIONS)
+  - PLATEAU differs from IMPOSSIBLE: PLATEAU means "tried multiple approaches, none improving" vs "fundamentally cannot be done"
+  - All termination checks follow same pattern: detect signal → update state → print message → exit
+---
