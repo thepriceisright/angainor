@@ -408,6 +408,62 @@ check_objective_impossible() {
   return 0
 }
 
+# Check for PLATEAU termination in Objective mode (agent-signaled)
+# Arguments: output_text
+# Returns: 0 if PLATEAU found (and state updated), 1 otherwise
+check_objective_plateau() {
+  local output="$1"
+
+  # Only run in objective mode
+  if [ "$MODE" != "objective" ]; then
+    return 1
+  fi
+
+  # Check for <objective>PLATEAU</objective> signal
+  if ! echo "$output" | grep -qE "^[[:space:]]*<objective>PLATEAU</objective>[[:space:]]*$"; then
+    return 1
+  fi
+
+  # Extract attempts from <attempts>...</attempts> block
+  local attempts=""
+  if echo "$output" | grep -q "<attempts>"; then
+    attempts=$(echo "$output" | sed -n '/<attempts>/,/<\/attempts>/p' | sed '1d;$d' | tr '\n' ' ' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+  fi
+
+  # Extract suggestion from <suggestion>...</suggestion> block
+  local suggestion=""
+  if echo "$output" | grep -q "<suggestion>"; then
+    suggestion=$(echo "$output" | sed -n '/<suggestion>/,/<\/suggestion>/p' | sed '1d;$d' | tr '\n' ' ' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+  fi
+
+  echo ""
+  echo "═══════════════════════════════════════════════════════"
+  echo "  OBJECTIVE PLATEAU - Diminishing Returns Detected"
+  echo "═══════════════════════════════════════════════════════"
+
+  # Print attempts and suggestion if available
+  if [ -n "$attempts" ]; then
+    echo "  Attempts: $attempts"
+  fi
+  if [ -n "$suggestion" ]; then
+    echo "  Suggestion: $suggestion"
+  fi
+
+  # Update objective.json status to 'plateau'
+  if [ -f "$CONFIG_FILE" ]; then
+    local iterations
+    iterations=$(jq -r '.status.iterations // 0' "$CONFIG_FILE")
+
+    jq '.status.state = "plateau"' "$CONFIG_FILE" > "$CONFIG_FILE.tmp" && mv "$CONFIG_FILE.tmp" "$CONFIG_FILE"
+
+    echo "  Completed after $iterations iteration(s)"
+  fi
+
+  echo "═══════════════════════════════════════════════════════"
+
+  return 0
+}
+
 # Update objective.json with iteration metrics (Objective mode only)
 # Arguments: iteration_number metrics_json
 # Returns: 0 on success, 1 on failure
@@ -876,6 +932,13 @@ EOF
       record_metrics "blocked" "OBJECTIVE_IMPOSSIBLE" "Agent determined objective is impossible"
       print_metrics_summary
       exit 2
+    fi
+
+    # Check for PLATEAU termination signal (agent-signaled diminishing returns)
+    if check_objective_plateau "$OUTPUT"; then
+      record_metrics "blocked" "OBJECTIVE_PLATEAU" "Agent signaled diminishing returns"
+      print_metrics_summary
+      exit 3
     fi
   fi
 
