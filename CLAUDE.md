@@ -8,11 +8,42 @@ Angainor is an autonomous AI agent loop that executes Product Requirements Docum
 
 Based on [Geoffrey Huntley's Ralph pattern](https://ghuntley.com/ralph/).
 
+## Two Execution Modes
+
+Angainor supports two distinct execution modes:
+
+| Mode | Config File | Prompt File | Use When |
+|------|-------------|-------------|----------|
+| **PRD Mode** (default) | `prd.json` | `prompt.md` | Tasks are well-defined with clear acceptance criteria |
+| **Objective Mode** | `objective.json` | `objective-prompt.md` | Goal is measurable but approach is unknown |
+
+**PRD Mode**: Execute predefined user stories with known implementations. Each iteration completes one story then marks it done.
+
+**Objective Mode**: Iterate toward a measurable goal through experimentation. Each iteration forms a hypothesis, tests it, and adjusts based on results.
+
+### When to Use Each Mode
+
+**Use PRD Mode when:**
+- You can break the work into discrete user stories
+- Each story has clear acceptance criteria
+- The implementation approach is known upfront
+- Examples: Add feature X, Fix bug Y, Refactor module Z
+
+**Use Objective Mode when:**
+- You have a measurable goal but unknown path
+- The approach requires experimentation
+- You need to iterate until a metric threshold is met
+- Examples: Improve accuracy to 90%, Reduce latency to <100ms, Achieve 80% test coverage
+
 ## Commands
 
 ```bash
-# Run Angainor (from a project that has prd.json)
-./angainor.sh [max_iterations]    # default: 10 iterations
+# Run Angainor in PRD mode (default - from a project that has prd.json)
+./angainor.sh [max_iterations]        # default: 10 iterations
+./angainor.sh --prd [max_iterations]  # explicit PRD mode
+
+# Run Angainor in Objective mode (from a project that has objective.json)
+./angainor.sh --objective [max_iterations]
 
 # Flowchart visualization (interactive React Flow diagram)
 cd flowchart && npm install && npm run dev    # dev server
@@ -24,11 +55,14 @@ cd flowchart && npm run lint                  # lint check
 
 ```
 ├── angainor.sh              # Main bash loop that spawns fresh Claude instances
-├── prompt.md             # Instructions given to each Claude instance during Angainor execution
+├── prompt.md             # Instructions for PRD mode iterations
+├── objective-prompt.md   # Instructions for Objective mode iterations
 ├── prd.json.example      # Example PRD format for reference
+├── objective.json.example # Example Objective format for reference
 ├── skills/               # Claude Code skills for the Angainor workflow
 │   ├── prd/              # Generate PRDs from feature descriptions
-│   ├── angainor/            # Convert markdown PRDs to prd.json format
+│   ├── angainor/         # Convert markdown PRDs to prd.json format
+│   ├── objective/        # Interactive objective definition with clarifying questions
 │   └── read-transcript/  # Search previous iteration transcripts
 └── flowchart/            # Interactive React Flow visualization (Vite + React 19 + TypeScript)
 ```
@@ -154,6 +188,7 @@ Skills are automatically available to future Claude Code sessions across all pro
 |-------|-----------------|---------|
 | `prd` | "create a prd", "write prd for", "plan this feature" | Generate detailed PRDs with clarifying questions |
 | `angainor` | "convert this prd", "angainor json", "create prd.json" | Convert markdown PRDs to prd.json format |
+| `objective` | "define an objective", "create objective.json", "set up objective mode" | Interactive objective definition with clarifying questions |
 | `read-transcript` | "search transcripts", "previous iteration", "what happened in" | Search deep context from transcripts/ |
 
 ## prd.json Format
@@ -185,6 +220,81 @@ Skills are automatically available to future Claude Code sessions across all pro
 - `blockedReason`: string (optional) - why a story is blocked, only on blocked stories
 
 Use `scripts/migrate-prd.sh [path/to/prd.json]` to migrate existing PRDs to the new format.
+
+## objective.json Format
+
+```json
+{
+  "objective": {
+    "description": "What we're trying to achieve (measurable goal)",
+    "context": "Background info explaining current state and what's been tried",
+    "constraints": ["Hard limits that must not be violated"]
+  },
+  "verification": {
+    "command": "python scripts/benchmark.py",
+    "successCriteria": "accuracy >= 0.90",
+    "metricsToTrack": ["accuracy", "precision", "recall", "inference_time_ms"]
+  },
+  "stopping": {
+    "maxIterations": 15,
+    "plateauThreshold": {
+      "metric": "accuracy",
+      "minImprovement": 0.01,
+      "windowSize": 3
+    },
+    "maxConsecutiveFailures": 3
+  },
+  "status": {
+    "state": "pending",
+    "iterations": 0,
+    "bestMetrics": {},
+    "metricHistory": []
+  }
+}
+```
+
+**Objective section:**
+- `description`: The measurable goal (what success looks like)
+- `context`: Current state and background (helps agent understand the problem)
+- `constraints`: Non-negotiable limits (agent must never violate these)
+
+**Verification section:**
+- `command`: Shell command to run benchmark/measurement
+- `successCriteria`: Expression that evaluates to true when objective is achieved
+- `metricsToTrack`: Metrics to extract from each iteration for tracking progress
+
+**Stopping section:**
+- `maxIterations`: Maximum iterations before automatic termination
+- `plateauThreshold`: Automatic plateau detection configuration
+  - `metric`: Which metric to monitor for improvement
+  - `minImprovement`: Minimum change required to count as improvement
+  - `windowSize`: Number of iterations to consider for plateau detection
+- `maxConsecutiveFailures`: Stop after this many failed iterations in a row
+
+**Status section (managed by angainor.sh):**
+- `state`: `pending` | `running` | `success` | `plateau` | `impossible` | `max_iterations`
+- `iterations`: Number of completed iterations
+- `bestMetrics`: Best values achieved for each tracked metric
+- `metricHistory`: Array of metrics from each iteration (for trend analysis)
+
+## Objective Mode Termination Conditions
+
+Objective mode has four termination conditions:
+
+| Signal | Exit Code | Meaning |
+|--------|-----------|---------|
+| `SUCCESS` | 0 | Objective achieved - `successCriteria` expression is true |
+| `IMPOSSIBLE` | 2 | Objective cannot be achieved (with evidence) |
+| `PLATEAU` | 3 | Diminishing returns - no improvement across `windowSize` iterations |
+| `MAX_ITERATIONS` | 4 | Iteration budget exhausted without success |
+
+**SUCCESS**: Agent outputs `<objective>SUCCESS</objective>` when metrics satisfy `successCriteria`.
+
+**IMPOSSIBLE**: Agent outputs `<objective>IMPOSSIBLE</objective>` with `<reason>` and `<category>` (technical|scope|resource) when there's concrete evidence the goal cannot be achieved.
+
+**PLATEAU**: Either agent-signaled (with `<attempts>` and `<suggestion>`) or automatically detected when the tracked metric shows less than `minImprovement` over `windowSize` iterations.
+
+**MAX_ITERATIONS**: Triggered when iteration count reaches the lower of CLI argument or `stopping.maxIterations`.
 
 ## Quality Requirements
 
