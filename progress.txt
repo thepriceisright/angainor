@@ -1,3 +1,18 @@
 # Angainor Progress Log
 Started: Fri Jan 23 09:16:11 AM CET 2026
 ---
+
+## 2026-01-23 - US-001
+Story: US-001 - Add --objective and --prd flags to angainor.sh
+- Added command-line argument parsing with while loop and case statement
+- MODE variable defaults to "prd", set to "objective" with --objective flag
+- CONFIG_FILE and PROMPT_FILE set based on mode (prd.json/prompt.md or objective.json/objective-prompt.md)
+- MODE_DISPLAY variable ("PRD" or "OBJECTIVE") used in startup message
+- Error messages guide user when config files are missing
+- Backward compatibility preserved: no flags = PRD mode, numeric arg = max_iterations
+- Files changed: angainor.sh
+- **Learnings for future iterations:**
+  - Use `while [[ $# -gt 0 ]]; do case $1 in ... esac; shift; done` pattern for argument parsing
+  - CONFIG_FILE is the active config, PRD_FILE kept as legacy alias for backward compatibility
+  - PROMPT_FILE defined but not yet used - will be integrated in US-004
+---
