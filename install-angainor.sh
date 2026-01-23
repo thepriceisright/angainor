@@ -157,6 +157,7 @@ install_angainor() {
     mkdir -p "$ANGAINOR_DIR/skills/prd"
     mkdir -p "$ANGAINOR_DIR/skills/angainor"
     mkdir -p "$ANGAINOR_DIR/skills/read-transcript"
+    mkdir -p "$ANGAINOR_DIR/skills/objective"
     mkdir -p "$ANGAINOR_DIR/scripts"
 
     # Download core files
@@ -167,14 +168,18 @@ install_angainor() {
     chmod +x "$ANGAINOR_DIR/angainor.sh"
     log_success "Downloaded angainor.sh"
 
-    # Prompt template
+    # Prompt templates
     download_file "prompt.md" "$ANGAINOR_DIR/prompt.md"
     log_success "Downloaded prompt.md"
+
+    # Objective Mode prompt template
+    download_file "objective-prompt.md" "$ANGAINOR_DIR/objective-prompt.md"
+    log_success "Downloaded objective-prompt.md"
 
     # Skills - install to both local .angainor/skills/ and global ~/.claude/skills/
     log_info "Downloading skills..."
     local GLOBAL_SKILLS_DIR="$HOME/.claude/skills"
-    mkdir -p "$GLOBAL_SKILLS_DIR/prd" "$GLOBAL_SKILLS_DIR/angainor" "$GLOBAL_SKILLS_DIR/read-transcript"
+    mkdir -p "$GLOBAL_SKILLS_DIR/prd" "$GLOBAL_SKILLS_DIR/angainor" "$GLOBAL_SKILLS_DIR/read-transcript" "$GLOBAL_SKILLS_DIR/objective"
 
     # prd skill
     download_file "skills/prd/SKILL.md" "$ANGAINOR_DIR/skills/prd/SKILL.md"
@@ -191,6 +196,11 @@ install_angainor() {
     cp "$ANGAINOR_DIR/skills/read-transcript/SKILL.md" "$GLOBAL_SKILLS_DIR/read-transcript/SKILL.md"
     log_success "Installed skills/read-transcript (local + global)"
 
+    # objective skill (Objective Mode interactive planning)
+    download_file "skills/objective/SKILL.md" "$ANGAINOR_DIR/skills/objective/SKILL.md"
+    cp "$ANGAINOR_DIR/skills/objective/SKILL.md" "$GLOBAL_SKILLS_DIR/objective/SKILL.md"
+    log_success "Installed skills/objective (local + global)"
+
     # Utility scripts
     log_info "Downloading utility scripts..."
     download_file "scripts/migrate-prd.sh" "$ANGAINOR_DIR/scripts/migrate-prd.sh"
@@ -201,6 +211,9 @@ install_angainor() {
     log_info "Downloading reference files..."
     download_file "prd.json.example" "$ANGAINOR_DIR/prd.json.example"
     log_success "Downloaded prd.json.example"
+
+    download_file "objective.json.example" "$ANGAINOR_DIR/objective.json.example"
+    log_success "Downloaded objective.json.example"
 
     # Create wrapper script in target directory
     log_info "Creating wrapper script..."
@@ -295,11 +308,13 @@ WRAPPER_EOF
     echo -e "${GREEN}╚══════════════════════════════════════════════════╝${NC}"
     echo ""
     echo "Installed files:"
-    echo "  $TARGET_DIR/angainor.sh          - Main entry point"
-    echo "  $TARGET_DIR/.mcp.json            - MCP config for headless browser testing"
-    echo "  $ANGAINOR_DIR/                   - Angainor internals"
-    echo "  $ANGAINOR_DIR/prd.json.example   - PRD format reference"
-    echo "  ~/.claude/skills/{prd,angainor,read-transcript}/ - Global skills"
+    echo "  $TARGET_DIR/angainor.sh                  - Main entry point"
+    echo "  $TARGET_DIR/.mcp.json                    - MCP config for headless browser testing"
+    echo "  $ANGAINOR_DIR/                           - Angainor internals"
+    echo "  $ANGAINOR_DIR/prd.json.example           - PRD format reference"
+    echo "  $ANGAINOR_DIR/objective.json.example     - Objective format reference"
+    echo "  $ANGAINOR_DIR/objective-prompt.md        - Objective Mode agent instructions"
+    echo "  ~/.claude/skills/{prd,angainor,read-transcript,objective}/ - Global skills"
     echo ""
     echo -e "${YELLOW}Next steps:${NC}"
     echo "  1. Restart Claude Code to load new skills (exit and run 'claude' again)"
@@ -309,11 +324,13 @@ WRAPPER_EOF
     echo "  3. Run: ./angainor.sh [max_iterations]"
     echo ""
     echo -e "${BLUE}Skills available:${NC}"
-    echo "  /prd      - Generate a PRD from feature description"
-    echo "  /angainor - Convert markdown PRD to prd.json format"
+    echo "  /prd       - Generate a PRD from feature description"
+    echo "  /angainor  - Convert markdown PRD to prd.json format"
+    echo "  /objective - Define measurable objectives for Objective Mode"
     echo ""
     echo -e "${BLUE}Documentation:${NC}"
     echo "  See $ANGAINOR_DIR/prd.json.example for PRD format"
+    echo "  See $ANGAINOR_DIR/objective.json.example for Objective Mode format"
     echo "  GitHub: https://github.com/thepriceisright/angainor"
     echo ""
 }
