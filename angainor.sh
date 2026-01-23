@@ -226,6 +226,88 @@ record_metrics() {
      "$METRICS_FILE" > "$METRICS_FILE.tmp" && mv "$METRICS_FILE.tmp" "$METRICS_FILE"
 }
 
+# Extract metrics from agent output
+# Arguments: output_text
+# Returns: JSON string of metrics, or empty string if no metrics found
+# Supports two formats:
+#   1. JSON: <metrics>{"key": value, ...}</metrics>
+#   2. Key-value: <metrics>key=value\nkey2=value2</metrics>
+extract_metrics() {
+  local output="$1"
+  local metrics_block metrics_content
+
+  # Check if metrics block exists
+  if ! echo "$output" | grep -q "<metrics>"; then
+    echo "  ⚠ No <metrics> block found in agent output" >&2
+    echo ""  # Return empty string
+    return 0  # Don't fail, just warn
+  fi
+
+  # Extract content between <metrics> and </metrics> tags
+  metrics_block=$(echo "$output" | sed -n '/<metrics>/,/<\/metrics>/p')
+
+  if [ -z "$metrics_block" ]; then
+    echo "  ⚠ Malformed <metrics> block (missing end tag)" >&2
+    echo ""
+    return 0
+  fi
+
+  # Remove the XML tags to get just the content
+  metrics_content=$(echo "$metrics_block" | sed '1d;$d' | tr -d '\r')
+
+  if [ -z "$metrics_content" ]; then
+    echo "  ⚠ Empty <metrics> block" >&2
+    echo ""
+    return 0
+  fi
+
+  # Detect format: JSON starts with { or [, otherwise assume key=value
+  local first_char
+  first_char=$(echo "$metrics_content" | sed 's/^[[:space:]]*//' | head -c 1)
+
+  if [ "$first_char" = "{" ] || [ "$first_char" = "[" ]; then
+    # JSON format - validate and pass through
+    if echo "$metrics_content" | jq '.' > /dev/null 2>&1; then
+      # Valid JSON - output it (compacted)
+      echo "$metrics_content" | jq -c '.'
+    else
+      echo "  ⚠ Invalid JSON in <metrics> block" >&2
+      echo ""
+      return 0
+    fi
+  else
+    # Key-value format: key=value (one per line)
+    # Convert to JSON object
+    local json_obj="{}"
+    local line key value
+
+    while IFS= read -r line; do
+      # Skip empty lines
+      [ -z "$line" ] && continue
+
+      # Parse key=value
+      if [[ "$line" =~ ^([a-zA-Z_][a-zA-Z0-9_]*)=(.*)$ ]]; then
+        key="${BASH_REMATCH[1]}"
+        value="${BASH_REMATCH[2]}"
+
+        # Determine if value is numeric or string
+        if [[ "$value" =~ ^-?[0-9]+\.?[0-9]*$ ]]; then
+          # Numeric value - add without quotes
+          json_obj=$(echo "$json_obj" | jq --arg k "$key" --argjson v "$value" '. + {($k): $v}')
+        else
+          # String value - add with quotes
+          json_obj=$(echo "$json_obj" | jq --arg k "$key" --arg v "$value" '. + {($k): $v}')
+        fi
+      else
+        echo "  ⚠ Skipping malformed line in metrics: $line" >&2
+      fi
+    done <<< "$metrics_content"
+
+    # Output the constructed JSON
+    echo "$json_obj" | jq -c '.'
+  fi
+}
+
 # Extract and write skill candidate from iteration output
 # Arguments: output_text story_id
 # Returns: 0 if skill extracted, 1 if no skill or skipped
