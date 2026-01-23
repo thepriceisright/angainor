@@ -105,3 +105,18 @@ Story: US-007 - Implement SUCCESS termination check
   - Termination checks go after update_objective_metrics() so final metrics are available
   - Follow pattern: detect signal → update state → print message → record metrics → exit
 ---
+
+## 2026-01-23 - US-008
+Story: US-008 - Implement IMPOSSIBLE termination check
+- Created check_objective_impossible() function following check_objective_success() pattern
+- Uses anchored grep pattern for XML signal detection: ^[[:space:]]*<objective>IMPOSSIBLE</objective>[[:space:]]*$
+- Extracts <reason> and <category> blocks using sed -n '/<tag>/,/<\/tag>/p'
+- Updates objective.json: status.state = "impossible", status.impossibleReason = extracted reason
+- Prints banner with Category, Reason, and iteration count
+- Integrated into main loop after SUCCESS check, exits with code 2
+- Files changed: angainor.sh
+- **Learnings for future iterations:**
+  - Follow established pattern for termination checks: detect signal → update state → print message → exit
+  - Use consistent exit codes: 0=SUCCESS, 2=IMPOSSIBLE (3 and 4 reserved for PLATEAU and MAX_ITERATIONS)
+  - Extract multiline XML blocks with sed, collapse newlines with tr '\n' ' ' for single-line output
+---
