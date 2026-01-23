@@ -139,6 +139,206 @@
       "files_changed": 3,
       "estimated_tokens": 22,
       "failure_reason": ""
+    },
+    {
+      "timestamp": "2026-01-23-09-16-11",
+      "duration_seconds": 147,
+      "story_id": "US-001",
+      "status": "success",
+      "lines_changed": 81,
+      "files_changed": 3,
+      "estimated_tokens": 222,
+      "failure_reason": ""
+    },
+    {
+      "timestamp": "2026-01-23-09-18-40",
+      "duration_seconds": 126,
+      "story_id": "US-002",
+      "status": "success",
+      "lines_changed": 29,
+      "files_changed": 3,
+      "estimated_tokens": 180,
+      "failure_reason": ""
+    },
+    {
+      "timestamp": "2026-01-23-09-20-48",
+      "duration_seconds": 155,
+      "story_id": "US-003",
+      "status": "success",
+      "lines_changed": 43,
+      "files_changed": 3,
+      "estimated_tokens": 184,
+      "failure_reason": ""
+    },
+    {
+      "timestamp": "2026-01-23-09-23-25",
+      "duration_seconds": 137,
+      "story_id": "",
+      "status": "success",
+      "lines_changed": 50,
+      "files_changed": 3,
+      "estimated_tokens": 206,
+      "failure_reason": ""
+    },
+    {
+      "timestamp": "2026-01-23-09-25-44",
+      "duration_seconds": 117,
+      "story_id": "US-006",
+      "status": "success",
+      "lines_changed": 61,
+      "files_changed": 3,
+      "estimated_tokens": 182,
+      "failure_reason": ""
+    },
+    {
+      "timestamp": "2026-01-23-09-27-43",
+      "duration_seconds": 166,
+      "story_id": "",
+      "status": "success",
+      "lines_changed": 72,
+      "files_changed": 3,
+      "estimated_tokens": 171,
+      "failure_reason": ""
+    },
+    {
+      "timestamp": "2026-01-23-09-30-31",
+      "duration_seconds": 110,
+      "story_id": "US-008",
+      "status": "success",
+      "lines_changed": 80,
+      "files_changed": 3,
+      "estimated_tokens": 119,
+      "failure_reason": ""
+    },
+    {
+      "timestamp": "2026-01-23-09-32-23",
+      "duration_seconds": 141,
+      "story_id": "",
+      "status": "success",
+      "lines_changed": 91,
+      "files_changed": 3,
+      "estimated_tokens": 163,
+      "failure_reason": ""
+    },
+    {
+      "timestamp": "2026-01-23-09-34-46",
+      "duration_seconds": 120,
+      "story_id": "",
+      "status": "success",
+      "lines_changed": 101,
+      "files_changed": 3,
+      "estimated_tokens": 156,
+      "failure_reason": ""
+    },
+    {
+      "timestamp": "2026-01-23-09-36-48",
+      "duration_seconds": 138,
+      "story_id": "",
+      "status": "success",
+      "lines_changed": 115,
+      "files_changed": 3,
+      "estimated_tokens": 189,
+      "failure_reason": ""
+    },
+    {
+      "timestamp": "2026-01-23-09-39-08",
+      "duration_seconds": 126,
+      "story_id": "",
+      "status": "success",
+      "lines_changed": 236,
+      "files_changed": 4,
+      "estimated_tokens": 161,
+      "failure_reason": ""
+    },
+    {
+      "timestamp": "2026-01-23-09-41-16",
+      "duration_seconds": 199,
+      "story_id": "US-012",
+      "status": "success",
+      "lines_changed": 356,
+      "files_changed": 4,
+      "estimated_tokens": 247,
+      "failure_reason": ""
+    },
+    {
+      "timestamp": "2026-01-23-09-44-37",
+      "duration_seconds": 188,
+      "story_id": "US-013",
+      "status": "success",
+      "lines_changed": 553,
+      "files_changed": 4,
+      "estimated_tokens": 221,
+      "failure_reason": ""
+    },
+    {
+      "timestamp": "2026-01-23-09-47-47",
+      "duration_seconds": 161,
+      "story_id": "US-015",
+      "status": "success",
+      "lines_changed": 384,
+      "files_changed": 4,
+      "estimated_tokens": 213,
+      "failure_reason": ""
+    },
+    {
+      "timestamp": "2026-01-23-09-50-30",
+      "duration_seconds": 133,
+      "story_id": "US-016",
+      "status": "failed",
+      "lines_changed": 366,
+      "files_changed": 4,
+      "estimated_tokens": 200,
+      "failure_reason": "Verification failed - one or more criteria marked with ❌"
+    },
+    {
+      "timestamp": "2026-01-23-09-52-45",
+      "duration_seconds": 127,
+      "story_id": "US-017",
+      "status": "success",
+      "lines_changed": 337,
+      "files_changed": 4,
+      "estimated_tokens": 193,
+      "failure_reason": ""
+    },
+    {
+      "timestamp": "2026-01-23-09-54-54",
+      "duration_seconds": 182,
+      "story_id": "US-018",
+      "status": "success",
+      "lines_changed": 626,
+      "files_changed": 4,
+      "estimated_tokens": 208,
+      "failure_reason": ""
+    },
+    {
+      "timestamp": "2026-01-23-09-57-58",
+      "duration_seconds": 153,
+      "story_id": "US-018",
+      "status": "success",
+      "lines_changed": 370,
+      "files_changed": 4,
+      "estimated_tokens": 133,
+      "failure_reason": ""
+    },
+    {
+      "timestamp": "2026-01-23-10-00-33",
+      "duration_seconds": 161,
+      "story_id": "US-020",
+      "status": "success",
+      "lines_changed": 487,
+      "files_changed": 4,
+      "estimated_tokens": 231,
+      "failure_reason": ""
+    },
+    {
+      "timestamp": "2026-01-23-10-03-16",
+      "duration_seconds": 179,
+      "story_id": "US-021",
+      "status": "success",
+      "lines_changed": 640,
+      "files_changed": 4,
+      "estimated_tokens": 153,
+      "failure_reason": ""
     }
   ]
 }
