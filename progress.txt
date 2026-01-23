@@ -135,3 +135,22 @@ Story: US-009 - Implement PLATEAU termination check (agent-signaled)
   - PLATEAU differs from IMPOSSIBLE: PLATEAU means "tried multiple approaches, none improving" vs "fundamentally cannot be done"
   - All termination checks follow same pattern: detect signal → update state → print message → exit
 ---
+
+## 2026-01-23 - US-010
+Story: US-010 - Implement metric-based plateau detection
+- Created check_metric_plateau() function for automatic plateau detection from metric history
+- Reads stopping.plateauThreshold config: metric, minImprovement, windowSize
+- Uses jq array slicing `[-$n:]` to extract last N iterations from metricHistory
+- Calculates improvement as max-min across the window (range of values)
+- Detects plateau when improvement < minImprovement threshold
+- Only triggers after at least windowSize iterations exist in history
+- Uses awk for floating point comparison (same pattern as update_objective_metrics)
+- Updates status.state to 'plateau' and prints detailed message
+- Integrated into main loop after agent-signaled PLATEAU check, exits with code 3
+- Files changed: angainor.sh
+- **Learnings for future iterations:**
+  - jq array slicing: `[-$n:]` gets last N elements; must use --argjson for numeric N
+  - Two types of plateau: agent-signaled (explicit) and metric-based (automatic)
+  - Metric-based plateau uses max-min (range) to detect stagnation, not sequential comparison
+  - Both plateau types use same exit code (3) but different record_metrics labels (OBJECTIVE_PLATEAU vs METRIC_PLATEAU)
+---
