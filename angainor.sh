@@ -464,6 +464,104 @@ check_objective_plateau() {
   return 0
 }
 
+# Check for MAX_ITERATIONS termination in Objective mode (agent-signaled)
+# Arguments: output_text
+# Returns: 0 if MAX_ITERATIONS found (and state updated), 1 otherwise
+check_objective_max_iterations() {
+  local output="$1"
+
+  # Only run in objective mode
+  if [ "$MODE" != "objective" ]; then
+    return 1
+  fi
+
+  # Check for <objective>MAX_ITERATIONS</objective> signal
+  if ! echo "$output" | grep -qE "^[[:space:]]*<objective>MAX_ITERATIONS</objective>[[:space:]]*$"; then
+    return 1
+  fi
+
+  echo ""
+  echo "═══════════════════════════════════════════════════════"
+  echo "  OBJECTIVE MAX ITERATIONS - Budget Exhausted"
+  echo "═══════════════════════════════════════════════════════"
+
+  # Update objective.json status to 'max_iterations'
+  if [ -f "$CONFIG_FILE" ]; then
+    local iterations best_metrics
+    iterations=$(jq -r '.status.iterations // 0' "$CONFIG_FILE")
+    best_metrics=$(jq -c '.status.bestMetrics // {}' "$CONFIG_FILE")
+
+    jq '.status.state = "max_iterations"' "$CONFIG_FILE" > "$CONFIG_FILE.tmp" && mv "$CONFIG_FILE.tmp" "$CONFIG_FILE"
+
+    echo "  Completed after $iterations iteration(s)"
+    echo "  Best metrics achieved: $best_metrics"
+  fi
+
+  echo "═══════════════════════════════════════════════════════"
+
+  return 0
+}
+
+# Check if iteration budget has been exhausted (automatic detection)
+# Arguments: current_iteration
+# Returns: 0 if max iterations reached (and state updated), 1 otherwise
+check_max_iterations_budget() {
+  local current_iteration="$1"
+
+  # Only run in objective mode
+  if [ "$MODE" != "objective" ]; then
+    return 1
+  fi
+
+  # Ensure objective.json exists
+  if [ ! -f "$CONFIG_FILE" ]; then
+    return 1
+  fi
+
+  # Read maxIterations from objective.json stopping config
+  local config_max_iterations
+  config_max_iterations=$(jq -r '.stopping.maxIterations // 0' "$CONFIG_FILE")
+
+  # If config doesn't specify maxIterations (0 or empty), don't trigger
+  if [ "$config_max_iterations" -eq 0 ]; then
+    return 1
+  fi
+
+  # Use the lower of: config maxIterations OR CLI MAX_ITERATIONS
+  local effective_max
+  if [ "$config_max_iterations" -lt "$MAX_ITERATIONS" ]; then
+    effective_max="$config_max_iterations"
+  else
+    effective_max="$MAX_ITERATIONS"
+  fi
+
+  # Check if we've reached the effective max
+  if [ "$current_iteration" -lt "$effective_max" ]; then
+    return 1
+  fi
+
+  # Max iterations reached - update state and print message
+  echo ""
+  echo "═══════════════════════════════════════════════════════"
+  echo "  OBJECTIVE MAX ITERATIONS - Budget Exhausted"
+  echo "═══════════════════════════════════════════════════════"
+  echo "  Reached iteration limit: $effective_max"
+  echo "  (CLI limit: $MAX_ITERATIONS, Config limit: $config_max_iterations)"
+
+  # Update objective.json status to 'max_iterations'
+  local iterations best_metrics
+  iterations=$(jq -r '.status.iterations // 0' "$CONFIG_FILE")
+  best_metrics=$(jq -c '.status.bestMetrics // {}' "$CONFIG_FILE")
+
+  jq '.status.state = "max_iterations"' "$CONFIG_FILE" > "$CONFIG_FILE.tmp" && mv "$CONFIG_FILE.tmp" "$CONFIG_FILE"
+
+  echo "  Completed after $iterations iteration(s)"
+  echo "  Best metrics achieved: $best_metrics"
+  echo "═══════════════════════════════════════════════════════"
+
+  return 0
+}
+
 # Check for metric-based plateau (automatic detection from metric history)
 # Arguments: none (reads from CONFIG_FILE)
 # Returns: 0 if plateau detected (and state updated), 1 otherwise
@@ -1027,6 +1125,20 @@ EOF
       record_metrics "blocked" "METRIC_PLATEAU" "No metric improvement in sliding window"
       print_metrics_summary
       exit 3
+    fi
+
+    # Check for MAX_ITERATIONS termination signal (agent-signaled)
+    if check_objective_max_iterations "$OUTPUT"; then
+      record_metrics "blocked" "OBJECTIVE_MAX_ITERATIONS" "Agent signaled iteration budget exhausted"
+      print_metrics_summary
+      exit 4
+    fi
+
+    # Check for automatic max iterations budget exhaustion
+    if check_max_iterations_budget "$i"; then
+      record_metrics "blocked" "MAX_ITERATIONS_BUDGET" "Reached iteration limit from config"
+      print_metrics_summary
+      exit 4
     fi
   fi
 
