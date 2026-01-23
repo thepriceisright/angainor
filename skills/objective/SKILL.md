@@ -371,44 +371,141 @@ Enter adjustments (e.g., "B. Change command to pytest") or 'OK' to proceed to St
 
 ## Step 3: Stopping Conditions
 
-Propose when the loop should stop.
+Propose when the loop should stop. **Adapt defaults based on objective type from Step 1.**
+
+### Type-Specific maxIterations Defaults
+
+Choose the default based on objective complexity:
+
+| Objective Type | Default maxIterations | Rationale |
+|----------------|----------------------|-----------|
+| **Performance (A)** | 12 iterations | Profiling + incremental optimizations, medium exploration |
+| **Accuracy (B)** | 15 iterations | ML tuning needs more exploration, hyperparameter space |
+| **Coverage (C)** | 10 iterations | Test writing is fairly predictable, lower variance |
+| **Quality (D)** | 10 iterations | Refactoring is incremental, bounded scope |
+| **Other/Complex** | 15 iterations | Unknown territory, allow more exploration |
+
+### Proposing Stopping Conditions
+
+Present the proposal with type-specific defaults filled in:
 
 ```markdown
 ## Proposed Stopping Conditions
 
-**Max Iterations:** [10-20, based on complexity]
-- Simple optimizations: 10 iterations
-- Complex/exploratory: 15-20 iterations
+### 1. Maximum Iterations
+**Proposed:** [N] iterations (based on [objective type] objectives)
 
-**Plateau Detection:**
-- Metric: [primary metric from success criteria]
-- Minimum improvement: 0.01 (1%)
-- Window size: 3 iterations
+This is your iteration budget. The loop will stop after this many attempts,
+regardless of whether the objective is achieved.
 
-The loop stops if the primary metric improves less than 1% over 3 consecutive iterations.
+```
+Adjust max iterations?
 
-**Consecutive Failures:** 3
-The loop stops if 3 iterations in a row fail to produce valid results.
+A. Keep [N] iterations (Recommended for [type] objectives)
+B. Fewer: 8 iterations (faster, less exploration)
+C. More: 20 iterations (thorough, more exploration)
+D. Custom: [enter number]
+```
 
-Adjust any of these? (Or 'OK' to proceed)
+### 2. Plateau Detection
+Stops the loop when progress stagnates - no need to keep trying if we're stuck.
+
+**Proposed settings:**
+- **Metric to watch:** `[primary metric from success criteria]`
+- **Minimum improvement:** 0.01 (1% change required between iterations)
+- **Window size:** 3 iterations (check improvement over last 3 attempts)
+
+**How it works:** If `[metric]` improves by less than 1% across 3 consecutive
+iterations, the loop stops with a "plateau" status.
+
+```
+Adjust plateau detection?
+
+A. Keep defaults (Recommended)
+B. More sensitive: minImprovement=0.02, windowSize=2 (stop sooner if stuck)
+C. Less sensitive: minImprovement=0.005, windowSize=5 (allow more experimentation)
+D. Custom: minImprovement=[value], windowSize=[value]
+E. Disable plateau detection (only stop on success or max iterations)
+```
+
+### 3. Consecutive Failures
+Safety stop for experiments that are completely broken (not just not improving).
+
+**Proposed:** 3 consecutive failures
+
+A "failure" means the iteration couldn't produce valid metrics at all
+(crashed, timed out, broke constraints).
+
+```
+Adjust consecutive failures limit?
+
+A. Keep 3 failures (Recommended)
+B. Stricter: 2 failures (fail fast)
+C. Lenient: 5 failures (allow more retries for flaky systems)
+D. Custom: [enter number]
+```
+```
+
+### Stopping Conditions Summary Table
+
+After getting user responses, present a summary:
+
+```markdown
+## Stopping Conditions Summary
+
+| Parameter | Value | Meaning |
+|-----------|-------|---------|
+| Max Iterations | [N] | Stop after [N] attempts maximum |
+| Plateau Metric | `[metric]` | Watch this metric for stagnation |
+| Min Improvement | [value] | Require at least [value*100]% improvement |
+| Window Size | [N] | Check improvement over last [N] iterations |
+| Max Failures | [N] | Stop after [N] consecutive broken iterations |
+
+**Estimated behavior:**
+- Best case: Objective achieved in ~[N/3] iterations
+- Typical case: Plateau detected around iteration [N*0.6]
+- Worst case: Loop runs all [N] iterations
+
+Confirm these settings? (yes/adjust/explain more)
 ```
 
 ### Explaining Parameters in Plain Language
 
-If the user seems unfamiliar:
+Always include this explanation with the initial proposal:
 
+```markdown
+**What these mean (in plain language):**
+
+📊 **Max Iterations** = Your budget
+   Think of each iteration as one attempt to improve. This is the maximum
+   number of attempts before giving up. More iterations = more chances to
+   find improvements, but also more time/resources.
+
+📈 **Plateau Detection** = "Are we stuck?"
+   If the metric barely changes for several attempts in a row, we're probably
+   stuck and should stop. The window size is how many attempts to look back,
+   and min improvement is how much change counts as "real progress."
+
+   Example: With windowSize=3 and minImprovement=0.01, if accuracy goes from
+   0.85 → 0.851 → 0.852 over 3 iterations, that's a plateau (only 0.002 total
+   improvement, less than 0.01).
+
+❌ **Consecutive Failures** = "Is something broken?"
+   Different from plateau. A failure means the experiment completely broke
+   (couldn't even measure the metric). 3 failures in a row suggests
+   something fundamental is wrong, not just slow progress.
 ```
-**What these mean:**
 
-- **Max Iterations**: The absolute maximum attempts. Think of this as your budget.
-  After this many tries, the loop stops regardless of progress.
+### Handling User Adjustments
 
-- **Plateau Detection**: How to detect "stuck" progress. If the metric barely
-  improves for several attempts, it's probably time to try a different approach.
+If user provides adjustments (e.g., "B, C, A"):
 
-- **Consecutive Failures**: Safety stop for completely broken experiments.
-  If nothing works 3 times in a row, something is fundamentally wrong.
-```
+1. Parse each response to the corresponding parameter
+2. Apply the changes
+3. Re-present the summary table with updated values
+4. Confirm again
+
+If user asks "explain more", provide the plain language explanation above.
 
 ---
 
