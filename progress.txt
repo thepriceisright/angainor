@@ -46,3 +46,17 @@ Story: US-003 - Create objective-prompt.md agent instructions
   - Termination signals include context blocks: <reason>, <category>, <attempts>, <suggestion>
   - Constraints section is critical - violations are worse than failed experiments
 ---
+
+## 2026-01-23 - US-004
+Story: US-004 - Select config and prompt files based on mode
+- Changed hardcoded `$SCRIPT_DIR/prompt.md` to `$PROMPT_FILE` in Claude command calls
+- Added prompt file validation with mode-specific error messages
+- PRD mode: uses prd.json and prompt.md (existing behavior)
+- Objective mode: uses objective.json and objective-prompt.md
+- All paths resolved via $SCRIPT_DIR (absolute path to script directory)
+- Files changed: angainor.sh
+- **Learnings for future iterations:**
+  - PROMPT_FILE was already defined in US-001 but not actually used - needed to wire it into the Claude invocation
+  - Config and prompt files share the same resolution pattern (script directory as base)
+  - Shellcheck SC2317 warnings for trap handlers are expected (invoked indirectly)
+---
