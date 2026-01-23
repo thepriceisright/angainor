@@ -29,3 +29,20 @@ Story: US-002 - Create objective.json schema and example
   - plateauThreshold nested structure: metric (string), minImprovement (float), windowSize (int)
   - metricHistory is an array that grows with each iteration
 ---
+
+## 2026-01-23 - US-003
+Story: US-003 - Create objective-prompt.md agent instructions
+- Created objective-prompt.md (280 lines) with complete Objective Mode agent instructions
+- Includes: task workflow (read objective.json → hypothesis → implement → verify → evaluate)
+- Includes: termination signals (SUCCESS, IMPOSSIBLE, PLATEAU, MAX_ITERATIONS)
+- Includes: <metrics> output block format (JSON and key-value alternatives)
+- Includes: constraint enforcement with violation recovery section
+- Includes: progress.txt format for objective iterations with Hypothesis/Changes/Result/Evaluation/Next direction
+- Includes: iteration strategy (early explore, middle exploit, late finalize)
+- Files changed: objective-prompt.md (new file)
+- **Learnings for future iterations:**
+  - Objective Mode uses `exp:` commit prefix instead of `feat:` for experiments
+  - <metrics> block supports both JSON and key-value format for flexibility
+  - Termination signals include context blocks: <reason>, <category>, <attempts>, <suggestion>
+  - Constraints section is critical - violations are worse than failed experiments
+---
