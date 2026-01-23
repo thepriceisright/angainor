@@ -308,6 +308,95 @@ extract_metrics() {
   fi
 }
 
+# Update objective.json with iteration metrics (Objective mode only)
+# Arguments: iteration_number metrics_json
+# Returns: 0 on success, 1 on failure
+update_objective_metrics() {
+  local iteration="$1"
+  local metrics_json="$2"
+
+  # Only run in objective mode
+  if [ "$MODE" != "objective" ]; then
+    return 0
+  fi
+
+  # Ensure objective.json exists
+  if [ ! -f "$CONFIG_FILE" ]; then
+    echo "  ⚠ Cannot update metrics: objective.json not found" >&2
+    return 1
+  fi
+
+  # 1. Increment status.iterations
+  # 2. Append to status.metricHistory with iteration number
+  # 3. Update status.bestMetrics if current is better
+
+  # Get the primary metric name for comparison
+  local primary_metric
+  primary_metric=$(jq -r '.stopping.plateauThreshold.metric // "accuracy"' "$CONFIG_FILE")
+
+  # Create the history entry with iteration number and metrics
+  local history_entry
+  if [ -n "$metrics_json" ] && [ "$metrics_json" != "{}" ]; then
+    history_entry=$(echo "$metrics_json" | jq --argjson iter "$iteration" '. + {"iteration": $iter}')
+  else
+    # No metrics - just record the iteration number
+    history_entry="{\"iteration\": $iteration}"
+  fi
+
+  # Get current best metric value (or null if not set)
+  local current_best
+  current_best=$(jq -r --arg m "$primary_metric" '.status.bestMetrics[$m] // null' "$CONFIG_FILE")
+
+  # Get new metric value from current metrics
+  local new_value
+  if [ -n "$metrics_json" ] && [ "$metrics_json" != "{}" ]; then
+    new_value=$(echo "$metrics_json" | jq -r --arg m "$primary_metric" '.[$m] // null')
+  else
+    new_value="null"
+  fi
+
+  # Determine if we should update bestMetrics
+  # Update if: current is null OR new value > current value
+  local should_update_best="false"
+  if [ "$new_value" != "null" ]; then
+    if [ "$current_best" = "null" ]; then
+      should_update_best="true"
+    else
+      # Compare numerically - new > current means improvement
+      # Use awk for floating point comparison
+      should_update_best=$(awk -v new="$new_value" -v cur="$current_best" 'BEGIN { print (new > cur) ? "true" : "false" }')
+    fi
+  fi
+
+  # Build the jq update expression
+  local jq_expr
+
+  if [ "$should_update_best" = "true" ]; then
+    # Update iterations, append to history, AND update bestMetrics
+    jq_expr='.status.iterations = ($iter | tonumber) | .status.metricHistory += [$entry] | .status.bestMetrics = $metrics'
+    jq --argjson iter "$iteration" \
+       --argjson entry "$history_entry" \
+       --argjson metrics "$metrics_json" \
+       "$jq_expr" \
+       "$CONFIG_FILE" > "$CONFIG_FILE.tmp" && mv "$CONFIG_FILE.tmp" "$CONFIG_FILE"
+  else
+    # Update iterations and append to history only
+    jq_expr='.status.iterations = ($iter | tonumber) | .status.metricHistory += [$entry]'
+    jq --argjson iter "$iteration" \
+       --argjson entry "$history_entry" \
+       "$jq_expr" \
+       "$CONFIG_FILE" > "$CONFIG_FILE.tmp" && mv "$CONFIG_FILE.tmp" "$CONFIG_FILE"
+  fi
+
+  if [ $? -eq 0 ]; then
+    echo "  ✓ Updated objective.json: iteration=$iteration, bestUpdated=$should_update_best"
+    return 0
+  else
+    echo "  ⚠ Failed to update objective.json" >&2
+    return 1
+  fi
+}
+
 # Extract and write skill candidate from iteration output
 # Arguments: output_text story_id
 # Returns: 0 if skill extracted, 1 if no skill or skipped
@@ -666,6 +755,15 @@ EOF
 
   # Record successful iteration metrics
   record_metrics "success" "$STORY_ID" ""
+
+  # For Objective mode: extract metrics and update objective.json
+  if [ "$MODE" = "objective" ]; then
+    EXTRACTED_METRICS=$(extract_metrics "$OUTPUT")
+    if [ -n "$EXTRACTED_METRICS" ]; then
+      echo "  Extracted metrics: $EXTRACTED_METRICS"
+    fi
+    update_objective_metrics "$i" "$EXTRACTED_METRICS"
+  fi
 
   # Extract skill candidates from iteration output (failures don't break loop)
   write_skill_candidate "$OUTPUT" "$STORY_ID" || true
