@@ -25,16 +25,24 @@ const nodeHeight = 70;
 // Loop phase - circular arrangement below
 // Exit - at bottom center
 
-type Phase = 'setup' | 'loop' | 'decision' | 'done';
+type Phase = 'setup' | 'loop' | 'decision' | 'done' | 'objective-setup' | 'objective-loop' | 'objective-decision' | 'objective-termination';
+type FlowMode = 'prd' | 'objective';
 
 const phaseColors: Record<Phase, { bg: string; border: string }> = {
+  // PRD mode colors (blue-ish theme)
   setup: { bg: '#f0f7ff', border: '#4a90d9' },
   loop: { bg: '#f5f5f5', border: '#666666' },
   decision: { bg: '#fff8e6', border: '#c9a227' },
   done: { bg: '#f0fff4', border: '#38a169' },
+  // Objective mode colors (purple/coral theme)
+  'objective-setup': { bg: '#f5f0ff', border: '#8b5cf6' },
+  'objective-loop': { bg: '#fdf4f0', border: '#c97a50' },
+  'objective-decision': { bg: '#fef9e6', border: '#d4a017' },
+  'objective-termination': { bg: '#f0fff4', border: '#38a169' },
 };
 
-const allSteps: { id: string; label: string; description: string; phase: Phase }[] = [
+// PRD Mode Steps
+const prdSteps: { id: string; label: string; description: string; phase: Phase }[] = [
   // Setup phase (vertical)
   { id: '1', label: 'You write a PRD', description: 'Define what you want to build', phase: 'setup' },
   { id: '2', label: 'Convert to prd.json', description: 'Break into small user stories', phase: 'setup' },
@@ -50,7 +58,30 @@ const allSteps: { id: string; label: string; description: string; phase: Phase }
   { id: '10', label: 'Done!', description: 'All stories complete', phase: 'done' },
 ];
 
-const notes = [
+// Objective Mode Steps
+const objectiveSteps: { id: string; label: string; description: string; phase: Phase }[] = [
+  // Setup phase
+  { id: 'obj-1', label: 'Define objective', description: 'Run /objective skill', phase: 'objective-setup' },
+  { id: 'obj-2', label: 'Create objective.json', description: 'Goal, metrics, constraints', phase: 'objective-setup' },
+  { id: 'obj-3', label: 'Run angainor.sh --objective', description: 'Starts experiment loop', phase: 'objective-setup' },
+  // Loop phase
+  { id: 'obj-4', label: 'Read objective.json', description: 'Load goal & metrics', phase: 'objective-loop' },
+  { id: 'obj-5', label: 'Form hypothesis', description: 'What might improve metric?', phase: 'objective-loop' },
+  { id: 'obj-6', label: 'Implement change', description: 'Try the experiment', phase: 'objective-loop' },
+  { id: 'obj-7', label: 'Run benchmark', description: 'Measure metrics', phase: 'objective-loop' },
+  { id: 'obj-8', label: 'Evaluate results', description: 'Did it improve?', phase: 'objective-decision' },
+  { id: 'obj-9', label: 'Update metrics', description: 'Log to objective.json', phase: 'objective-loop' },
+  // Decision
+  { id: 'obj-10', label: 'Goal achieved?', description: '', phase: 'objective-decision' },
+  // Termination branches
+  { id: 'obj-success', label: 'SUCCESS', description: 'Objective achieved!', phase: 'objective-termination' },
+  { id: 'obj-impossible', label: 'IMPOSSIBLE', description: 'Cannot be achieved', phase: 'objective-termination' },
+  { id: 'obj-plateau', label: 'PLATEAU', description: 'Diminishing returns', phase: 'objective-termination' },
+  { id: 'obj-max', label: 'MAX_ITERATIONS', description: 'Budget exhausted', phase: 'objective-termination' },
+];
+
+// PRD Mode notes
+const prdNotes = [
   {
     id: 'note-1',
     appearsWithStep: 2,
@@ -75,6 +106,45 @@ const notes = [
     content: `Also updates AGENTS.md with
 patterns discovered, so future
 iterations learn from this one.`,
+  },
+];
+
+// Objective Mode notes
+const objectiveNotes = [
+  {
+    id: 'obj-note-1',
+    appearsWithStep: 2,
+    position: { x: 340, y: 100 },
+    color: { bg: '#f5f0ff', border: '#8b5cf6' },
+    content: `{
+  "objective": {
+    "description": "Improve accuracy to 90%"
+  },
+  "verification": {
+    "command": "python benchmark.py",
+    "successCriteria": "accuracy >= 0.90"
+  }
+}`,
+  },
+  {
+    id: 'obj-note-2',
+    appearsWithStep: 5,
+    position: { x: 520, y: 340 },
+    color: { bg: '#fdf4f0', border: '#c97a50' },
+    content: `Hypothesis: "Adding dropout
+layer might reduce overfitting
+and improve test accuracy"`,
+  },
+  {
+    id: 'obj-note-3',
+    appearsWithStep: 10,
+    position: { x: 60, y: 750 },
+    color: { bg: '#e8f5e9', border: '#4caf50' },
+    content: `Exit codes:
+• SUCCESS = 0
+• IMPOSSIBLE = 2
+• PLATEAU = 3
+• MAX_ITERATIONS = 4`,
   },
 ];
 
@@ -120,7 +190,8 @@ function NoteNode({ data }: { data: { content: string; color: { bg: string; bord
 
 const nodeTypes = { custom: CustomNode, note: NoteNode };
 
-const positions: { [key: string]: { x: number; y: number } } = {
+// PRD Mode positions
+const prdPositions: { [key: string]: { x: number; y: number } } = {
   // Vertical setup flow on the left
   '1': { x: 20, y: 20 },
   '2': { x: 80, y: 130 },
@@ -135,10 +206,35 @@ const positions: { [key: string]: { x: number; y: number } } = {
   // Exit
   '10': { x: 350, y: 880 },
   // Notes
-  ...Object.fromEntries(notes.map(n => [n.id, n.position])),
+  ...Object.fromEntries(prdNotes.map(n => [n.id, n.position])),
 };
 
-const edgeConnections: { source: string; target: string; sourceHandle?: string; targetHandle?: string; label?: string }[] = [
+// Objective Mode positions
+const objectivePositions: { [key: string]: { x: number; y: number } } = {
+  // Setup phase (vertical on left)
+  'obj-1': { x: 20, y: 20 },
+  'obj-2': { x: 80, y: 130 },
+  'obj-3': { x: 60, y: 250 },
+  // Loop phase
+  'obj-4': { x: 40, y: 420 },
+  'obj-5': { x: 300, y: 320 },
+  'obj-6': { x: 550, y: 400 },
+  'obj-7': { x: 750, y: 500 },
+  'obj-8': { x: 550, y: 600 },
+  'obj-9': { x: 300, y: 530 },
+  // Decision
+  'obj-10': { x: 40, y: 680 },
+  // Termination branches (fan out at bottom)
+  'obj-success': { x: 20, y: 850 },
+  'obj-impossible': { x: 250, y: 850 },
+  'obj-plateau': { x: 480, y: 850 },
+  'obj-max': { x: 710, y: 850 },
+  // Notes
+  ...Object.fromEntries(objectiveNotes.map(n => [n.id, n.position])),
+};
+
+// PRD Mode edge connections
+const prdEdgeConnections: { source: string; target: string; sourceHandle?: string; targetHandle?: string; label?: string }[] = [
   // Setup phase (vertical) - bottom to top connections
   { source: '1', target: '2', sourceHandle: 'bottom', targetHandle: 'top' },
   { source: '2', target: '3', sourceHandle: 'bottom', targetHandle: 'top' },
@@ -154,7 +250,38 @@ const edgeConnections: { source: string; target: string; sourceHandle?: string; 
   { source: '9', target: '10', sourceHandle: 'bottom', targetHandle: 'top', label: 'No' },
 ];
 
-function createNode(step: typeof allSteps[0], visible: boolean, position?: { x: number; y: number }): Node {
+// Objective Mode edge connections
+const objectiveEdgeConnections: { source: string; target: string; sourceHandle?: string; targetHandle?: string; label?: string }[] = [
+  // Setup phase (vertical)
+  { source: 'obj-1', target: 'obj-2', sourceHandle: 'bottom', targetHandle: 'top' },
+  { source: 'obj-2', target: 'obj-3', sourceHandle: 'bottom', targetHandle: 'top' },
+  { source: 'obj-3', target: 'obj-4', sourceHandle: 'bottom', targetHandle: 'top' },
+  // Loop phase
+  { source: 'obj-4', target: 'obj-5', sourceHandle: 'right', targetHandle: 'left' },
+  { source: 'obj-5', target: 'obj-6', sourceHandle: 'right', targetHandle: 'left' },
+  { source: 'obj-6', target: 'obj-7', sourceHandle: 'right', targetHandle: 'top' },
+  { source: 'obj-7', target: 'obj-8', sourceHandle: 'bottom', targetHandle: 'right-target' },
+  { source: 'obj-8', target: 'obj-9', sourceHandle: 'left-source', targetHandle: 'right-target' },
+  { source: 'obj-9', target: 'obj-10', sourceHandle: 'left-source', targetHandle: 'right-target' },
+  // Loop back
+  { source: 'obj-10', target: 'obj-4', sourceHandle: 'top-source', targetHandle: 'bottom-target', label: 'No' },
+  // Termination branches from decision node
+  { source: 'obj-10', target: 'obj-success', sourceHandle: 'bottom', targetHandle: 'top', label: 'Yes' },
+  { source: 'obj-8', target: 'obj-impossible', sourceHandle: 'bottom', targetHandle: 'top', label: 'Evidence' },
+  { source: 'obj-10', target: 'obj-plateau', sourceHandle: 'right', targetHandle: 'top', label: 'Stagnant' },
+  { source: 'obj-10', target: 'obj-max', sourceHandle: 'right', targetHandle: 'top', label: 'Budget' },
+];
+
+type StepType = { id: string; label: string; description: string; phase: Phase };
+type NoteType = { id: string; appearsWithStep: number; position: { x: number; y: number }; color: { bg: string; border: string }; content: string };
+type EdgeConnType = { source: string; target: string; sourceHandle?: string; targetHandle?: string; label?: string };
+
+function createNode(
+  step: StepType,
+  visible: boolean,
+  positions: { [key: string]: { x: number; y: number } },
+  position?: { x: number; y: number }
+): Node {
   return {
     id: step.id,
     type: 'custom',
@@ -174,7 +301,7 @@ function createNode(step: typeof allSteps[0], visible: boolean, position?: { x: 
   };
 }
 
-function createEdge(conn: typeof edgeConnections[0], visible: boolean): Edge {
+function createEdge(conn: EdgeConnType, visible: boolean): Edge {
   return {
     id: `e${conn.source}-${conn.target}`,
     source: conn.source,
@@ -208,7 +335,12 @@ function createEdge(conn: typeof edgeConnections[0], visible: boolean): Edge {
   };
 }
 
-function createNoteNode(note: typeof notes[0], visible: boolean, position?: { x: number; y: number }): Node {
+function createNoteNode(
+  note: NoteType,
+  visible: boolean,
+  positions: { [key: string]: { x: number; y: number } },
+  position?: { x: number; y: number }
+): Node {
   return {
     id: note.id,
     type: 'note',
@@ -225,28 +357,68 @@ function createNoteNode(note: typeof notes[0], visible: boolean, position?: { x:
   };
 }
 
-function App() {
-  const [visibleCount, setVisibleCount] = useState(1);
-  const nodePositions = useRef<{ [key: string]: { x: number; y: number } }>({ ...positions });
+// Helper to get mode-specific data
+function getModeData(mode: FlowMode) {
+  if (mode === 'prd') {
+    return {
+      steps: prdSteps,
+      notes: prdNotes,
+      positions: prdPositions,
+      edges: prdEdgeConnections,
+      title: 'How Angainor Works with Amp',
+      subtitle: 'Autonomous AI agent loop for completing PRDs',
+    };
+  } else {
+    return {
+      steps: objectiveSteps,
+      notes: objectiveNotes,
+      positions: objectivePositions,
+      edges: objectiveEdgeConnections,
+      title: 'Objective Mode: Goal-Driven Iteration',
+      subtitle: 'Experiment toward measurable goals with unknown approaches',
+    };
+  }
+}
 
-  const getNodes = (count: number) => {
-    const stepNodes = allSteps.map((step, index) =>
-      createNode(step, index < count, nodePositions.current[step.id])
+// Compute initial nodes without ref (for initial render)
+function computeInitialNodes(currentModeData: ReturnType<typeof getModeData>) {
+  const stepNodes = currentModeData.steps.map((step, index) =>
+    createNode(step, index < 1, currentModeData.positions, currentModeData.positions[step.id])
+  );
+  const noteNodes = currentModeData.notes.map(note => {
+    const noteVisible = 1 >= note.appearsWithStep;
+    return createNoteNode(note, noteVisible, currentModeData.positions, currentModeData.positions[note.id]);
+  });
+  return [...stepNodes, ...noteNodes];
+}
+
+function App() {
+  const [mode, setMode] = useState<FlowMode>('prd');
+  const [visibleCount, setVisibleCount] = useState(1);
+
+  const modeData = getModeData(mode);
+  const nodePositions = useRef<{ [key: string]: { x: number; y: number } }>({ ...prdPositions });
+
+  const getNodes = useCallback((count: number, currentModeData: ReturnType<typeof getModeData>) => {
+    const stepNodes = currentModeData.steps.map((step, index) =>
+      createNode(step, index < count, nodePositions.current, nodePositions.current[step.id])
     );
-    const noteNodes = notes.map(note => {
+    const noteNodes = currentModeData.notes.map(note => {
       const noteVisible = count >= note.appearsWithStep;
-      return createNoteNode(note, noteVisible, nodePositions.current[note.id]);
+      return createNoteNode(note, noteVisible, nodePositions.current, nodePositions.current[note.id]);
     });
     return [...stepNodes, ...noteNodes];
-  };
+  }, []);
 
-  const initialNodes = getNodes(1);
-  const initialEdges = edgeConnections.map((conn, index) =>
-    createEdge(conn, index < 0)
-  );
+  const getEdgeVisibility = useCallback((conn: EdgeConnType, visibleStepCount: number, steps: StepType[]) => {
+    const sourceIndex = steps.findIndex(s => s.id === conn.source);
+    const targetIndex = steps.findIndex(s => s.id === conn.target);
+    return sourceIndex < visibleStepCount && targetIndex < visibleStepCount;
+  }, []);
 
-  const [nodes, setNodes] = useNodesState(initialNodes);
-  const [edges, setEdges] = useEdgesState(initialEdges);
+  // Initialize with PRD mode data (computed outside of ref access)
+  const [nodes, setNodes] = useNodesState(computeInitialNodes(getModeData('prd')));
+  const [edges, setEdges] = useEdgesState(prdEdgeConnections.map((conn) => createEdge(conn, false)));
 
   const onNodesChange = useCallback(
     (changes: NodeChange[]) => {
@@ -281,52 +453,69 @@ function App() {
     [setEdges]
   );
 
-  const getEdgeVisibility = (conn: typeof edgeConnections[0], visibleStepCount: number) => {
-    const sourceIndex = allSteps.findIndex(s => s.id === conn.source);
-    const targetIndex = allSteps.findIndex(s => s.id === conn.target);
-    return sourceIndex < visibleStepCount && targetIndex < visibleStepCount;
-  };
-
   const handleNext = useCallback(() => {
-    if (visibleCount < allSteps.length) {
+    if (visibleCount < modeData.steps.length) {
       const newCount = visibleCount + 1;
       setVisibleCount(newCount);
 
-      setNodes(getNodes(newCount));
+      setNodes(getNodes(newCount, modeData));
       setEdges(
-        edgeConnections.map((conn) =>
-          createEdge(conn, getEdgeVisibility(conn, newCount))
+        modeData.edges.map((conn) =>
+          createEdge(conn, getEdgeVisibility(conn, newCount, modeData.steps))
         )
       );
     }
-  }, [visibleCount, setNodes, setEdges]);
+  }, [visibleCount, modeData, setNodes, setEdges, getNodes, getEdgeVisibility]);
 
   const handlePrev = useCallback(() => {
     if (visibleCount > 1) {
       const newCount = visibleCount - 1;
       setVisibleCount(newCount);
 
-      setNodes(getNodes(newCount));
+      setNodes(getNodes(newCount, modeData));
       setEdges(
-        edgeConnections.map((conn) =>
-          createEdge(conn, getEdgeVisibility(conn, newCount))
+        modeData.edges.map((conn) =>
+          createEdge(conn, getEdgeVisibility(conn, newCount, modeData.steps))
         )
       );
     }
-  }, [visibleCount, setNodes, setEdges]);
+  }, [visibleCount, modeData, setNodes, setEdges, getNodes, getEdgeVisibility]);
 
   const handleReset = useCallback(() => {
     setVisibleCount(1);
-    nodePositions.current = { ...positions };
-    setNodes(getNodes(1));
-    setEdges(edgeConnections.map((conn, index) => createEdge(conn, index < 0)));
-  }, [setNodes, setEdges]);
+    nodePositions.current = { ...modeData.positions };
+    setNodes(getNodes(1, modeData));
+    setEdges(modeData.edges.map((conn) => createEdge(conn, false)));
+  }, [modeData, setNodes, setEdges, getNodes]);
+
+  const handleModeSwitch = useCallback((newMode: FlowMode) => {
+    const newModeData = getModeData(newMode);
+    setMode(newMode);
+    setVisibleCount(1);
+    nodePositions.current = { ...newModeData.positions };
+    setNodes(getNodes(1, newModeData));
+    setEdges(newModeData.edges.map((conn) => createEdge(conn, false)));
+  }, [setNodes, setEdges, getNodes]);
 
   return (
     <div className="app-container">
       <div className="header">
-        <h1>How Angainor Works with Amp</h1>
-        <p>Autonomous AI agent loop for completing PRDs</p>
+        <div className="mode-toggle">
+          <button
+            className={`mode-btn ${mode === 'prd' ? 'active' : ''}`}
+            onClick={() => handleModeSwitch('prd')}
+          >
+            PRD Mode
+          </button>
+          <button
+            className={`mode-btn objective ${mode === 'objective' ? 'active' : ''}`}
+            onClick={() => handleModeSwitch('objective')}
+          >
+            Objective Mode
+          </button>
+        </div>
+        <h1>{modeData.title}</h1>
+        <p>{modeData.subtitle}</p>
       </div>
       <div className="flow-container">
         <ReactFlow
@@ -360,9 +549,9 @@ function App() {
           Previous
         </button>
         <span className="step-counter">
-          Step {visibleCount} of {allSteps.length}
+          Step {visibleCount} of {modeData.steps.length}
         </span>
-        <button onClick={handleNext} disabled={visibleCount >= allSteps.length}>
+        <button onClick={handleNext} disabled={visibleCount >= modeData.steps.length}>
           Next
         </button>
         <button onClick={handleReset} className="reset-btn">
@@ -370,7 +559,7 @@ function App() {
         </button>
       </div>
       <div className="instructions">
-        Click Next to reveal each step
+        Click Next to reveal each step • Switch between modes above
       </div>
     </div>
   );

@@ -1,19 +1,21 @@
 {
-  "project": "AutoLearning",
-  "branchName": "ralph/auto-learning",
-  "description": "Auto-Learning (Claudeception Integration) - Automatic skill extraction from Ralph iterations for cross-project learning",
+  "project": "Angainor",
+  "branchName": "angainor/objective-mode",
+  "description": "Objective Mode - Goal-driven autonomous iteration for open-ended exploration where the approach is unknown upfront",
   "userStories": [
     {
       "id": "US-001",
-      "title": "Add skill extraction instructions to prompt.md",
-      "description": "As a Ralph iteration, I need instructions on when and how to evaluate for skill extraction so I can output candidates when quality gates pass.",
+      "title": "Add --objective and --prd flags to angainor.sh",
+      "description": "As a user, I want to specify the execution mode via command-line flags so that I can choose between PRD mode and Objective mode.",
       "acceptanceCriteria": [
-        "Add 'Skill Extraction (Claudeception)' section to prompt.md",
-        "Document all 4 quality gates (non-obvious, reusable, verified, specific trigger)",
-        "Document when to extract vs when NOT to extract",
-        "Document the 3 categories (error-resolutions, patterns, workflows)",
-        "Document the <<<SKILL_CANDIDATE>>> output format with all required fields",
-        "Section is 60 lines or less"
+        "./angainor.sh defaults to PRD mode (existing behavior)",
+        "./angainor.sh --prd [max_iterations] explicitly runs PRD mode",
+        "./angainor.sh --objective [max_iterations] runs Objective mode",
+        "Mode is displayed at startup: 'Starting Angainor in PRD mode' or 'Starting Angainor in OBJECTIVE mode'",
+        "Error message if objective.json missing when using --objective",
+        "Error message if prd.json missing when using --prd or default",
+        "Existing PRD mode behavior unchanged (backward compatible)",
+        "Typecheck passes (shellcheck on angainor.sh)"
       ],
       "priority": 1,
       "passes": true,
@@ -23,16 +25,16 @@
     },
     {
       "id": "US-002",
-      "title": "Add write_skill_candidate function to ralph.sh",
-      "description": "As ralph.sh, I need to detect and parse skill candidate blocks from iteration output so skills can be written to disk.",
+      "title": "Create objective.json schema and example",
+      "description": "As a developer, I want a documented schema for objective.json so that the skill and script have a consistent format to work with.",
       "acceptanceCriteria": [
-        "Add SKILL_DIR constant pointing to ~/.claude/skills/ralph-learnings",
-        "Add write_skill_candidate() function that extracts category, name, description, content",
-        "Function validates all required fields are present",
-        "Function validates category is in allowed list (error-resolutions, patterns, workflows)",
-        "Function skips gracefully if block malformed or missing",
-        "Function skips if skill with same name already exists (no overwrites)",
-        "Script passes shellcheck"
+        "Create objective.json.example in repo root with full schema",
+        "Schema includes: objective (description, context, constraints)",
+        "Schema includes: verification (command, successCriteria, metricsToTrack)",
+        "Schema includes: stopping (maxIterations, plateauThreshold, maxConsecutiveFailures)",
+        "Schema includes: status (state, iterations, bestMetrics, metricHistory)",
+        "Example uses realistic values (not placeholder text)",
+        "Typecheck passes"
       ],
       "priority": 2,
       "passes": true,
@@ -42,88 +44,87 @@
     },
     {
       "id": "US-003",
-      "title": "Write skill files with correct format",
-      "description": "As ralph.sh, I need to write extracted skills with proper SKILL.md format so Claude Code can discover and load them.",
+      "title": "Create objective-prompt.md agent instructions",
+      "description": "As an autonomous agent, I need clear instructions for Objective mode so that I know how to iterate toward the goal.",
       "acceptanceCriteria": [
-        "Create category subdirectory if it doesn't exist",
-        "Write skill file with YAML frontmatter (only name and description fields)",
-        "Description preserved exactly as provided (should start with 'Use when...')",
-        "Content body preserved with all sections",
-        "Append Origin section with extracted timestamp, project name, and story ID",
-        "Output success message: '✓ Extracted skill: [category]/[name].md'",
-        "Script passes shellcheck"
+        "Create objective-prompt.md in the same directory as prompt.md (repo root)",
+        "Instructions explain: read objective.json, read progress.txt, form hypothesis, implement, verify",
+        "Instructions include termination signal formats: <objective>SUCCESS</objective>, <objective>IMPOSSIBLE</objective>, <objective>PLATEAU</objective>",
+        "Instructions include <metrics> output block format for metric extraction",
+        "Instructions explain constraints must be respected",
+        "Instructions include progress.txt format for objective mode iterations",
+        "Typecheck passes"
       ],
       "priority": 3,
       "passes": true,
       "status": "passed",
       "attempts": 1,
-      "notes": "Already implemented in US-002 - file writing logic was part of write_skill_candidate function"
+      "notes": ""
     },
     {
       "id": "US-004",
-      "title": "Integrate extraction into main loop",
-      "description": "As ralph.sh, I need to call skill extraction after successful iterations so discoveries are captured automatically.",
+      "title": "Select config and prompt files based on mode",
+      "description": "As a script, I need to load the correct configuration and prompt files based on the execution mode.",
       "acceptanceCriteria": [
-        "Call write_skill_candidate after record_metrics 'success' line",
-        "Pass OUTPUT and STORY_ID to function",
-        "Extraction runs on every successful iteration (no flag needed)",
-        "Extraction failures don't break the main loop",
-        "Script passes shellcheck"
+        "PRD mode uses prd.json and prompt.md",
+        "Objective mode uses objective.json and objective-prompt.md",
+        "Config file path is resolved relative to script directory (where angainor.sh is invoked)",
+        "Prompt file path is resolved from repo root (same as config)",
+        "Clear error if config file doesn't exist",
+        "Typecheck passes (shellcheck)"
       ],
       "priority": 4,
       "passes": true,
       "status": "passed",
       "attempts": 1,
-      "notes": "Depends on US-002 and US-003 (function must be complete)"
+      "notes": "Depends on US-001 (mode detection must exist)"
     },
     {
       "id": "US-005",
-      "title": "Test bash extraction with valid input",
-      "description": "As a developer, I need to verify the extraction function works correctly with well-formed input.",
+      "title": "Extract metrics from agent output",
+      "description": "As the loop controller, I need to parse metrics from the agent's output so that I can track progress over iterations.",
       "acceptanceCriteria": [
-        "Create test script scripts/test-skill-extraction.sh",
-        "Test extracts all fields correctly from valid skill candidate block",
-        "Test creates correct directory structure",
-        "Test writes valid YAML frontmatter",
-        "Test preserves multiline content correctly",
-        "All assertions pass",
-        "Test script passes shellcheck"
+        "Parse <metrics>...</metrics> XML block from agent output",
+        "Support JSON format inside metrics block: {\"accuracy\": 0.85, \"loss\": 0.42}",
+        "Support key=value format: accuracy=0.85 (one per line)",
+        "Handle missing metrics block gracefully (warn, don't fail)",
+        "Extracted metrics available as JSON string for jq processing",
+        "Typecheck passes (shellcheck)"
       ],
       "priority": 5,
       "passes": true,
       "status": "passed",
       "attempts": 1,
-      "notes": "Depends on US-004 (full implementation must exist to test)"
+      "notes": ""
     },
     {
       "id": "US-006",
-      "title": "Test bash extraction edge cases",
-      "description": "As a developer, I need to verify the extraction function handles edge cases gracefully.",
+      "title": "Update objective.json with iteration metrics",
+      "description": "As the loop controller, I need to persist metrics to objective.json so that progress is tracked across iterations.",
       "acceptanceCriteria": [
-        "Test: missing skill candidate block returns 0, no output",
-        "Test: malformed block (missing fields) shows warning, no file created",
-        "Test: invalid category shows warning, no file created",
-        "Test: duplicate skill name shows warning, existing file not overwritten",
-        "All assertions pass",
-        "Test script passes shellcheck"
+        "Increment status.iterations after each iteration",
+        "Append current metrics to status.metricHistory array with iteration number",
+        "Update status.bestMetrics if current metrics are better (compare primary metric from plateauThreshold.metric)",
+        "Use jq for JSON manipulation (already a dependency)",
+        "Handle first iteration (empty metricHistory) correctly",
+        "Typecheck passes (shellcheck)"
       ],
       "priority": 6,
       "passes": true,
       "status": "passed",
       "attempts": 1,
-      "notes": "Depends on US-005 (test infrastructure must exist)"
+      "notes": "Depends on US-005 (metrics must be extractable first)"
     },
     {
       "id": "US-007",
-      "title": "Document auto-learning in CLAUDE.md",
-      "description": "As a developer reading CLAUDE.md, I need to understand the auto-learning feature so I know how it works.",
+      "title": "Implement SUCCESS termination check",
+      "description": "As the loop controller, I need to detect when the objective is achieved so that I can stop iterating.",
       "acceptanceCriteria": [
-        "Add 'Skill Extraction (Claudeception)' subsection under Key Patterns",
-        "Document quality gates (brief summary)",
-        "Document output format reference",
-        "Document storage location and categories",
-        "Note cross-project learning benefit",
-        "Section is 20 lines or less"
+        "Detect <objective>SUCCESS</objective> in agent output",
+        "Update status.state to 'success' in objective.json",
+        "Print success message with final metrics",
+        "Exit loop with success status (exit 0)",
+        "Typecheck passes (shellcheck)"
       ],
       "priority": 7,
       "passes": true,
@@ -133,22 +134,280 @@
     },
     {
       "id": "US-008",
-      "title": "End-to-end integration test",
-      "description": "As a developer, I need to verify the complete flow works from iteration output to skill file on disk.",
+      "title": "Implement IMPOSSIBLE termination check",
+      "description": "As the loop controller, I need to detect when the agent determines the objective is impossible so that I can stop and report why.",
       "acceptanceCriteria": [
-        "Run a mock Ralph iteration with skill candidate in output",
-        "Verify skill file created at correct path",
-        "Verify skill file has valid YAML frontmatter",
-        "Verify skill file content matches input",
-        "Verify Origin section populated correctly",
-        "Clean up test artifacts after test",
-        "Test script passes shellcheck"
+        "Detect <objective>IMPOSSIBLE</objective> in agent output",
+        "Extract reason from <reason>...</reason> block",
+        "Extract category from <category>...</category> block (technical|scope|resource)",
+        "Update status.state to 'impossible' in objective.json",
+        "Store reason in status.impossibleReason field",
+        "Print clear message explaining why objective is impossible",
+        "Exit loop with distinct status (exit 2)",
+        "Typecheck passes (shellcheck)"
       ],
       "priority": 8,
       "passes": true,
       "status": "passed",
       "attempts": 1,
-      "notes": "Final verification - depends on all previous stories"
+      "notes": ""
+    },
+    {
+      "id": "US-009",
+      "title": "Implement PLATEAU termination check (agent-signaled)",
+      "description": "As the loop controller, I need to detect when the agent signals diminishing returns so that I can stop and summarize attempts.",
+      "acceptanceCriteria": [
+        "Detect <objective>PLATEAU</objective> in agent output",
+        "Extract attempts summary from <attempts>...</attempts> block",
+        "Extract suggestion from <suggestion>...</suggestion> block",
+        "Update status.state to 'plateau' in objective.json",
+        "Print plateau summary with attempts and suggestion",
+        "Exit loop with distinct status (exit 3)",
+        "Typecheck passes (shellcheck)"
+      ],
+      "priority": 9,
+      "passes": true,
+      "status": "passed",
+      "attempts": 1,
+      "notes": ""
+    },
+    {
+      "id": "US-010",
+      "title": "Implement metric-based plateau detection",
+      "description": "As the loop controller, I need to automatically detect plateaus from metrics even if the agent doesn't signal it.",
+      "acceptanceCriteria": [
+        "Read plateau config: stopping.plateauThreshold.{metric, minImprovement, windowSize}",
+        "Compare last N iterations (windowSize) of the tracked metric",
+        "Detect plateau when improvement < minImprovement across the window",
+        "Only trigger after at least windowSize iterations exist",
+        "Update status.state to 'plateau' when detected",
+        "Print message: 'Metric plateau detected (no improvement in last N iterations)'",
+        "Typecheck passes (shellcheck)"
+      ],
+      "priority": 10,
+      "passes": true,
+      "status": "passed",
+      "attempts": 1,
+      "notes": "Depends on US-006 (metricHistory must be populated)"
+    },
+    {
+      "id": "US-011",
+      "title": "Implement MAX_ITERATIONS termination",
+      "description": "As the loop controller, I need to respect the iteration budget and stop gracefully when exhausted.",
+      "acceptanceCriteria": [
+        "Check iteration count against stopping.maxIterations from objective.json",
+        "Also respect command-line max_iterations argument (use lower of the two)",
+        "Detect <objective>MAX_ITERATIONS</objective> if agent outputs it",
+        "Update status.state to 'max_iterations' in objective.json",
+        "Print summary with best metrics achieved",
+        "Exit loop with distinct status (exit 4)",
+        "Typecheck passes (shellcheck)"
+      ],
+      "priority": 11,
+      "passes": true,
+      "status": "passed",
+      "attempts": 1,
+      "notes": ""
+    },
+    {
+      "id": "US-012",
+      "title": "Print objective summary on completion",
+      "description": "As a user, I want a clear summary when the objective loop completes so that I understand what was achieved.",
+      "acceptanceCriteria": [
+        "Print different summaries based on termination reason (SUCCESS, IMPOSSIBLE, PLATEAU, MAX_ITERATIONS)",
+        "Include: iterations completed, best metrics, metric trend (improving/flat/declining)",
+        "For SUCCESS: highlight which metrics met criteria",
+        "For PLATEAU: show the window of stagnant iterations",
+        "For IMPOSSIBLE: show the reason and category",
+        "Typecheck passes (shellcheck)"
+      ],
+      "priority": 12,
+      "passes": true,
+      "status": "passed",
+      "attempts": 1,
+      "notes": "Depends on US-007 through US-011 (all termination types must exist)"
+    },
+    {
+      "id": "US-013",
+      "title": "Create /objective skill with clarifying questions",
+      "description": "As a user, I want an interactive skill that helps me define a measurable objective through guided questions.",
+      "acceptanceCriteria": [
+        "Create skills/objective/SKILL.md",
+        "Skill asks questions about: target endpoint/component, success metric, target value, constraints",
+        "Questions use lettered multiple-choice format (A, B, C, D) where appropriate",
+        "Questions adapt based on objective type (performance, accuracy, coverage, etc.)",
+        "Skill can handle free-form answers for custom requirements",
+        "Typecheck passes"
+      ],
+      "priority": 13,
+      "passes": true,
+      "status": "passed",
+      "attempts": 1,
+      "notes": ""
+    },
+    {
+      "id": "US-014",
+      "title": "Implement verification approach proposal",
+      "description": "As a user, I want the skill to propose how success will be measured so that I can approve or adjust the verification method.",
+      "acceptanceCriteria": [
+        "Skill proposes verification command based on objective type",
+        "Skill offers to create benchmark scripts if none exist",
+        "Skill proposes metrics to track (relevant to objective type)",
+        "Skill proposes success criteria expression (e.g., 'accuracy >= 0.90')",
+        "User can adjust any part of the proposal",
+        "Typecheck passes"
+      ],
+      "priority": 14,
+      "passes": true,
+      "status": "passed",
+      "attempts": 1,
+      "notes": "Depends on US-013 (skill structure must exist)"
+    },
+    {
+      "id": "US-015",
+      "title": "Implement stopping conditions proposal",
+      "description": "As a user, I want the skill to propose sensible stopping conditions so that the loop doesn't run forever or stop too early.",
+      "acceptanceCriteria": [
+        "Propose default maxIterations based on objective complexity (10-20 typical)",
+        "Propose plateauThreshold with sensible defaults (metric, minImprovement: 0.01, windowSize: 3)",
+        "Propose maxConsecutiveFailures (default: 3)",
+        "User can adjust all stopping parameters",
+        "Explain what each parameter means in plain language",
+        "Typecheck passes"
+      ],
+      "priority": 15,
+      "passes": true,
+      "status": "passed",
+      "attempts": 1,
+      "notes": "Depends on US-014"
+    },
+    {
+      "id": "US-016",
+      "title": "Generate objective.json after approval",
+      "description": "As a user, I want the skill to create objective.json only after I approve the plan so that I have control over what gets executed.",
+      "acceptanceCriteria": [
+        "Present complete plan summary before writing any files",
+        "Wait for explicit user approval ('yes' or similar)",
+        "Allow user to request adjustments before approval",
+        "Write objective.json to project root after approval",
+        "Initialize status fields: state='pending', iterations=0, bestMetrics={}, metricHistory=[]",
+        "Print next steps: 'To start: ./angainor.sh --objective'",
+        "Typecheck passes"
+      ],
+      "priority": 16,
+      "passes": true,
+      "status": "passed",
+      "attempts": 1,
+      "notes": "Depends on US-015"
+    },
+    {
+      "id": "US-017",
+      "title": "Support benchmark script creation",
+      "description": "As a user, I want the skill to create simple benchmark scripts when I don't have existing ones.",
+      "acceptanceCriteria": [
+        "Offer to create benchmark when user selects 'Create a benchmark for me'",
+        "Generate Python script for common cases (API latency, test coverage, accuracy)",
+        "Script outputs JSON with metrics matching metricsToTrack",
+        "Script is executable and includes shebang",
+        "Place script in scripts/ directory with descriptive name",
+        "Typecheck passes"
+      ],
+      "priority": 17,
+      "passes": true,
+      "status": "passed",
+      "attempts": 1,
+      "notes": "Depends on US-014 (verification proposal must offer this option)"
+    },
+    {
+      "id": "US-018",
+      "title": "Update install-angainor.sh for objective mode",
+      "description": "As a user installing Angainor, I want the installer to include all objective mode files.",
+      "acceptanceCriteria": [
+        "Download objective-prompt.md to target project root",
+        "Download objective.json.example to target project root",
+        "Download skills/objective/SKILL.md to target project skills directory",
+        "Existing installation behavior unchanged",
+        "Typecheck passes (shellcheck)"
+      ],
+      "priority": 18,
+      "passes": true,
+      "status": "passed",
+      "attempts": 1,
+      "notes": ""
+    },
+    {
+      "id": "US-019",
+      "title": "Update CLAUDE.md with objective mode documentation",
+      "description": "As a developer, I want CLAUDE.md to document objective mode so that Claude instances understand both modes.",
+      "acceptanceCriteria": [
+        "Add 'Objective Mode' section explaining when to use it vs PRD mode",
+        "Document objective.json schema fields",
+        "Document termination conditions (SUCCESS, IMPOSSIBLE, PLATEAU, MAX_ITERATIONS)",
+        "Document the /objective skill trigger phrases",
+        "Add to skills table: /objective skill",
+        "Typecheck passes"
+      ],
+      "priority": 19,
+      "passes": true,
+      "status": "passed",
+      "attempts": 1,
+      "notes": ""
+    },
+    {
+      "id": "US-020",
+      "title": "Update README.md with objective mode usage",
+      "description": "As a new user, I want README to explain objective mode so that I know how to use it.",
+      "acceptanceCriteria": [
+        "Add 'Objective Mode' section with use cases",
+        "Include example invocation: ./angainor.sh --objective 15",
+        "Show example objective.json",
+        "Explain the two-phase flow (interactive planning → autonomous execution)",
+        "Typecheck passes"
+      ],
+      "priority": 20,
+      "passes": true,
+      "status": "passed",
+      "attempts": 1,
+      "notes": ""
+    },
+    {
+      "id": "US-021",
+      "title": "Update flowchart visualization for objective mode",
+      "description": "As a user, I want the flowchart to show the Objective Mode flow so that I can visualize how it works.",
+      "acceptanceCriteria": [
+        "Add Objective Mode nodes and edges to the React Flow diagram",
+        "Show the iteration loop: read objective → hypothesis → implement → verify → evaluate",
+        "Show termination branches: SUCCESS, IMPOSSIBLE, PLATEAU, MAX_ITERATIONS",
+        "Use distinct styling/colors to differentiate from PRD mode",
+        "Flowchart remains readable with both modes shown",
+        "npm run build succeeds",
+        "npm run lint passes",
+        "Verify in browser using dev-browser skill"
+      ],
+      "priority": 21,
+      "passes": true,
+      "status": "passed",
+      "attempts": 1,
+      "notes": ""
+    },
+    {
+      "id": "US-022",
+      "title": "Verify PRD mode still works unchanged",
+      "description": "As a user of existing PRD mode, I want to ensure the new changes don't break my workflow.",
+      "acceptanceCriteria": [
+        "./angainor.sh (no flags) runs PRD mode as before",
+        "./angainor.sh 5 (number only) runs PRD mode with 5 iterations",
+        "PRD mode still reads prd.json and prompt.md",
+        "PRD mode still outputs <promise>COMPLETE</promise> on completion",
+        "Verification blocks still work in PRD mode",
+        "metrics.json output still works in PRD mode",
+        "Typecheck passes (shellcheck)"
+      ],
+      "priority": 22,
+      "passes": true,
+      "status": "passed",
+      "attempts": 1,
+      "notes": "Final verification story - run after all other changes"
     }
   ]
 }

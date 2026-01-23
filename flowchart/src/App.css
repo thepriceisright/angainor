@@ -19,6 +19,48 @@
   border-bottom: 1px solid #eee;
 }
 
+.mode-toggle {
+  display: flex;
+  justify-content: center;
+  gap: 8px;
+  margin-bottom: 16px;
+}
+
+.mode-btn {
+  padding: 8px 20px;
+  font-size: 14px;
+  font-weight: 500;
+  border: 2px solid #4a90d9;
+  background: #fff;
+  color: #4a90d9;
+  border-radius: 20px;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.mode-btn:hover {
+  background: #f0f7ff;
+}
+
+.mode-btn.active {
+  background: #4a90d9;
+  color: #fff;
+}
+
+.mode-btn.objective {
+  border-color: #8b5cf6;
+  color: #8b5cf6;
+}
+
+.mode-btn.objective:hover {
+  background: #f5f0ff;
+}
+
+.mode-btn.objective.active {
+  background: #8b5cf6;
+  color: #fff;
+}
+
 .header h1 {
   font-size: 32px;
   font-weight: 600;

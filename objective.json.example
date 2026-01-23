@@ -1,0 +1,32 @@
+{
+  "objective": {
+    "description": "Improve image classification accuracy to 90% or higher",
+    "context": "The current model achieves 78% accuracy on the validation set. Users are reporting misclassifications on edge cases, particularly with low-contrast images and unusual angles.",
+    "constraints": [
+      "Must not increase inference time beyond 200ms per image",
+      "Must maintain compatibility with existing API contract",
+      "Cannot use external APIs or cloud services for inference",
+      "Model size must stay under 500MB"
+    ]
+  },
+  "verification": {
+    "command": "python scripts/benchmark_accuracy.py --dataset validation",
+    "successCriteria": "accuracy >= 0.90",
+    "metricsToTrack": ["accuracy", "precision", "recall", "f1_score", "inference_time_ms"]
+  },
+  "stopping": {
+    "maxIterations": 15,
+    "plateauThreshold": {
+      "metric": "accuracy",
+      "minImprovement": 0.01,
+      "windowSize": 3
+    },
+    "maxConsecutiveFailures": 3
+  },
+  "status": {
+    "state": "pending",
+    "iterations": 0,
+    "bestMetrics": {},
+    "metricHistory": []
+  }
+}

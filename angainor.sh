@@ -1,13 +1,83 @@
 #!/bin/bash
 # Angainor Wiggum - Long-running AI agent loop
-# Usage: ./angainor.sh [max_iterations]
+# Usage: ./angainor.sh [max_iterations]              # PRD mode (default)
+#        ./angainor.sh --prd [max_iterations]        # PRD mode (explicit)
+#        ./angainor.sh --objective [max_iterations]  # Objective mode
 
 set -e
 
-MAX_ITERATIONS=${1:-10}
+# Parse command-line arguments
+MODE="prd"  # Default mode
+MAX_ITERATIONS=""
+
+while [[ $# -gt 0 ]]; do
+  case $1 in
+    --objective)
+      MODE="objective"
+      shift
+      ;;
+    --prd)
+      MODE="prd"
+      shift
+      ;;
+    *)
+      # Assume it's the max_iterations number
+      if [[ $1 =~ ^[0-9]+$ ]]; then
+        MAX_ITERATIONS="$1"
+      else
+        echo "Error: Unknown argument '$1'"
+        echo "Usage: ./angainor.sh [--prd|--objective] [max_iterations]"
+        exit 1
+      fi
+      shift
+      ;;
+  esac
+done
+
+# Set default max iterations
+MAX_ITERATIONS=${MAX_ITERATIONS:-10}
+
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# Set config and prompt files based on mode
+if [ "$MODE" = "objective" ]; then
+  CONFIG_FILE="$SCRIPT_DIR/objective.json"
+  PROMPT_FILE="$SCRIPT_DIR/objective-prompt.md"
+  MODE_DISPLAY="OBJECTIVE"
+else
+  CONFIG_FILE="$SCRIPT_DIR/prd.json"
+  PROMPT_FILE="$SCRIPT_DIR/prompt.md"
+  MODE_DISPLAY="PRD"
+fi
+
+# Legacy aliases for backward compatibility (PRD mode uses PRD_FILE variable)
 PRD_FILE="$SCRIPT_DIR/prd.json"
 PROGRESS_FILE="$SCRIPT_DIR/progress.txt"
+
+# Validate config file exists
+if [ ! -f "$CONFIG_FILE" ]; then
+  if [ "$MODE" = "objective" ]; then
+    echo "Error: objective.json not found at $CONFIG_FILE"
+    echo "Create an objective.json file or use --prd flag for PRD mode."
+  else
+    echo "Error: prd.json not found at $CONFIG_FILE"
+    echo "Create a prd.json file or use --objective flag for Objective mode."
+  fi
+  exit 1
+fi
+
+# Validate prompt file exists
+if [ ! -f "$PROMPT_FILE" ]; then
+  if [ "$MODE" = "objective" ]; then
+    echo "Error: objective-prompt.md not found at $PROMPT_FILE"
+    echo "This file contains agent instructions for Objective mode."
+  else
+    echo "Error: prompt.md not found at $PROMPT_FILE"
+    echo "This file contains agent instructions for PRD mode."
+  fi
+  exit 1
+fi
+
 ARCHIVE_DIR="$SCRIPT_DIR/archive"
 LAST_BRANCH_FILE="$SCRIPT_DIR/.last-branch"
 TRANSCRIPT_DIR="$SCRIPT_DIR/transcripts"
@@ -154,6 +224,615 @@ record_metrics() {
      --arg fr "$failure_reason" \
      '.iterations += [{"timestamp": $ts, "duration_seconds": $dur, "story_id": $sid, "status": $st, "lines_changed": $lc, "files_changed": $fc, "estimated_tokens": $et, "failure_reason": $fr}]' \
      "$METRICS_FILE" > "$METRICS_FILE.tmp" && mv "$METRICS_FILE.tmp" "$METRICS_FILE"
+}
+
+# Extract metrics from agent output
+# Arguments: output_text
+# Returns: JSON string of metrics, or empty string if no metrics found
+# Supports two formats:
+#   1. JSON: <metrics>{"key": value, ...}</metrics>
+#   2. Key-value: <metrics>key=value\nkey2=value2</metrics>
+extract_metrics() {
+  local output="$1"
+  local metrics_block metrics_content
+
+  # Check if metrics block exists
+  if ! echo "$output" | grep -q "<metrics>"; then
+    echo "  ⚠ No <metrics> block found in agent output" >&2
+    echo ""  # Return empty string
+    return 0  # Don't fail, just warn
+  fi
+
+  # Extract content between <metrics> and </metrics> tags
+  metrics_block=$(echo "$output" | sed -n '/<metrics>/,/<\/metrics>/p')
+
+  if [ -z "$metrics_block" ]; then
+    echo "  ⚠ Malformed <metrics> block (missing end tag)" >&2
+    echo ""
+    return 0
+  fi
+
+  # Remove the XML tags to get just the content
+  metrics_content=$(echo "$metrics_block" | sed '1d;$d' | tr -d '\r')
+
+  if [ -z "$metrics_content" ]; then
+    echo "  ⚠ Empty <metrics> block" >&2
+    echo ""
+    return 0
+  fi
+
+  # Detect format: JSON starts with { or [, otherwise assume key=value
+  local first_char
+  first_char=$(echo "$metrics_content" | sed 's/^[[:space:]]*//' | head -c 1)
+
+  if [ "$first_char" = "{" ] || [ "$first_char" = "[" ]; then
+    # JSON format - validate and pass through
+    if echo "$metrics_content" | jq '.' > /dev/null 2>&1; then
+      # Valid JSON - output it (compacted)
+      echo "$metrics_content" | jq -c '.'
+    else
+      echo "  ⚠ Invalid JSON in <metrics> block" >&2
+      echo ""
+      return 0
+    fi
+  else
+    # Key-value format: key=value (one per line)
+    # Convert to JSON object
+    local json_obj="{}"
+    local line key value
+
+    while IFS= read -r line; do
+      # Skip empty lines
+      [ -z "$line" ] && continue
+
+      # Parse key=value
+      if [[ "$line" =~ ^([a-zA-Z_][a-zA-Z0-9_]*)=(.*)$ ]]; then
+        key="${BASH_REMATCH[1]}"
+        value="${BASH_REMATCH[2]}"
+
+        # Determine if value is numeric or string
+        if [[ "$value" =~ ^-?[0-9]+\.?[0-9]*$ ]]; then
+          # Numeric value - add without quotes
+          json_obj=$(echo "$json_obj" | jq --arg k "$key" --argjson v "$value" '. + {($k): $v}')
+        else
+          # String value - add with quotes
+          json_obj=$(echo "$json_obj" | jq --arg k "$key" --arg v "$value" '. + {($k): $v}')
+        fi
+      else
+        echo "  ⚠ Skipping malformed line in metrics: $line" >&2
+      fi
+    done <<< "$metrics_content"
+
+    # Output the constructed JSON
+    echo "$json_obj" | jq -c '.'
+  fi
+}
+
+# Print comprehensive objective summary on completion
+# Arguments: termination_reason (SUCCESS, IMPOSSIBLE, PLATEAU, MAX_ITERATIONS)
+#            optional: additional_context (reason, category, attempts, suggestion, etc.)
+# Reads from CONFIG_FILE for metrics and status
+print_objective_summary() {
+  local reason="$1"
+  local context="$2"
+  local category="$3"
+  local attempts="$4"
+  local suggestion="$5"
+
+  # Only run in objective mode
+  if [ "$MODE" != "objective" ]; then
+    return 0
+  fi
+
+  # Ensure objective.json exists
+  if [ ! -f "$CONFIG_FILE" ]; then
+    return 0
+  fi
+
+  # Read status and metrics from objective.json
+  local iterations best_metrics metric_history success_criteria
+  local primary_metric window_size
+  iterations=$(jq -r '.status.iterations // 0' "$CONFIG_FILE")
+  best_metrics=$(jq -c '.status.bestMetrics // {}' "$CONFIG_FILE")
+  metric_history=$(jq -c '.status.metricHistory // []' "$CONFIG_FILE")
+  success_criteria=$(jq -r '.verification.successCriteria // ""' "$CONFIG_FILE")
+  primary_metric=$(jq -r '.stopping.plateauThreshold.metric // "accuracy"' "$CONFIG_FILE")
+  window_size=$(jq -r '.stopping.plateauThreshold.windowSize // 3' "$CONFIG_FILE")
+
+  # Calculate metric trend from history
+  local trend="unknown"
+  local history_length
+  history_length=$(echo "$metric_history" | jq 'length')
+
+  if [ "$history_length" -ge 2 ]; then
+    # Get first and last value of primary metric
+    local first_val last_val
+    first_val=$(echo "$metric_history" | jq -r --arg m "$primary_metric" '.[0][$m] // null')
+    last_val=$(echo "$metric_history" | jq -r --arg m "$primary_metric" '.[-1][$m] // null')
+
+    if [ "$first_val" != "null" ] && [ "$last_val" != "null" ]; then
+      # Calculate trend using awk for floating point comparison
+      local diff
+      diff=$(awk -v last="$last_val" -v first="$first_val" 'BEGIN { printf "%.6f", last - first }')
+      local is_improving is_declining
+      is_improving=$(awk -v d="$diff" 'BEGIN { print (d > 0.01) ? "true" : "false" }')
+      is_declining=$(awk -v d="$diff" 'BEGIN { print (d < -0.01) ? "true" : "false" }')
+
+      if [ "$is_improving" = "true" ]; then
+        trend="improving"
+      elif [ "$is_declining" = "true" ]; then
+        trend="declining"
+      else
+        trend="flat"
+      fi
+    fi
+  fi
+
+  echo ""
+  echo "═══════════════════════════════════════════════════════"
+
+  # Print header based on termination reason
+  case "$reason" in
+    SUCCESS)
+      echo "  ✅ OBJECTIVE ACHIEVED - SUCCESS"
+      ;;
+    IMPOSSIBLE)
+      echo "  ❌ OBJECTIVE IMPOSSIBLE"
+      ;;
+    PLATEAU)
+      echo "  ⚠️ OBJECTIVE PLATEAU - Diminishing Returns"
+      ;;
+    MAX_ITERATIONS)
+      echo "  ⏱️ OBJECTIVE MAX ITERATIONS - Budget Exhausted"
+      ;;
+    *)
+      echo "  OBJECTIVE TERMINATED: $reason"
+      ;;
+  esac
+
+  echo "═══════════════════════════════════════════════════════"
+  echo ""
+
+  # Common stats
+  echo "  📊 Summary"
+  echo "  ─────────────────────────────────────────────────────"
+  echo "  Iterations completed: $iterations"
+  echo "  Metric trend: $trend"
+  echo "  Best metrics: $best_metrics"
+  echo ""
+
+  # Reason-specific details
+  case "$reason" in
+    SUCCESS)
+      echo "  🎯 Success Criteria"
+      echo "  ─────────────────────────────────────────────────────"
+      if [ -n "$success_criteria" ]; then
+        echo "  Criteria: $success_criteria"
+        # Highlight which metrics met criteria by showing best metrics
+        local tracked_metrics
+        tracked_metrics=$(jq -r '.verification.metricsToTrack // [] | join(", ")' "$CONFIG_FILE")
+        if [ -n "$tracked_metrics" ]; then
+          echo "  Tracked metrics: $tracked_metrics"
+        fi
+        # Show final values vs criteria
+        if [ "$best_metrics" != "{}" ]; then
+          echo ""
+          echo "  Final metric values:"
+          echo "$best_metrics" | jq -r 'to_entries[] | "    \(.key): \(.value)"'
+        fi
+      fi
+      ;;
+
+    IMPOSSIBLE)
+      echo "  ❌ Reason"
+      echo "  ─────────────────────────────────────────────────────"
+      if [ -n "$category" ]; then
+        echo "  Category: $category"
+      fi
+      if [ -n "$context" ]; then
+        echo "  Reason: $context"
+      fi
+      # Also show what was in objective.json impossibleReason if available
+      local stored_reason
+      stored_reason=$(jq -r '.status.impossibleReason // ""' "$CONFIG_FILE")
+      if [ -n "$stored_reason" ] && [ "$stored_reason" != "$context" ]; then
+        echo "  Details: $stored_reason"
+      fi
+      ;;
+
+    PLATEAU)
+      echo "  📉 Plateau Details"
+      echo "  ─────────────────────────────────────────────────────"
+      echo "  Primary metric: $primary_metric"
+      echo "  Window size: $window_size iterations"
+
+      # Show the stagnant window of iterations
+      if [ "$history_length" -ge "$window_size" ]; then
+        echo ""
+        echo "  Stagnant iterations (last $window_size):"
+        echo "$metric_history" | jq -r --arg m "$primary_metric" --argjson n "$window_size" \
+          '.[-$n:][] | "    Iteration \(.iteration): \($m)=\(.[$m] // "N/A")"'
+      fi
+
+      # Show attempts and suggestion if available (agent-signaled plateau)
+      if [ -n "$attempts" ]; then
+        echo ""
+        echo "  Attempts tried: $attempts"
+      fi
+      if [ -n "$suggestion" ]; then
+        echo ""
+        echo "  Suggestion: $suggestion"
+      fi
+      ;;
+
+    MAX_ITERATIONS)
+      echo "  ⏱️ Budget Details"
+      echo "  ─────────────────────────────────────────────────────"
+      local config_max cli_max
+      config_max=$(jq -r '.stopping.maxIterations // 0' "$CONFIG_FILE")
+      cli_max="$MAX_ITERATIONS"
+      echo "  Config limit: $config_max"
+      echo "  CLI limit: $cli_max"
+      if [ "$config_max" -lt "$cli_max" ] && [ "$config_max" -gt 0 ]; then
+        echo "  (Stopped at config limit)"
+      else
+        echo "  (Stopped at CLI limit)"
+      fi
+
+      # Show progress towards success criteria
+      if [ -n "$success_criteria" ]; then
+        echo ""
+        echo "  Progress towards success criteria:"
+        echo "    Criteria: $success_criteria"
+        echo "    Best achieved: $best_metrics"
+      fi
+      ;;
+  esac
+
+  echo ""
+  echo "═══════════════════════════════════════════════════════"
+}
+
+# Check for SUCCESS termination in Objective mode
+# Arguments: output_text
+# Returns: 0 if SUCCESS found (and state updated), 1 otherwise
+check_objective_success() {
+  local output="$1"
+
+  # Only run in objective mode
+  if [ "$MODE" != "objective" ]; then
+    return 1
+  fi
+
+  # Check for <objective>SUCCESS</objective> signal
+  if ! echo "$output" | grep -qE "^[[:space:]]*<objective>SUCCESS</objective>[[:space:]]*$"; then
+    return 1
+  fi
+
+  # Update objective.json status to 'success'
+  if [ -f "$CONFIG_FILE" ]; then
+    jq '.status.state = "success"' "$CONFIG_FILE" > "$CONFIG_FILE.tmp" && mv "$CONFIG_FILE.tmp" "$CONFIG_FILE"
+  fi
+
+  # Print comprehensive summary
+  print_objective_summary "SUCCESS"
+
+  return 0
+}
+
+# Check for IMPOSSIBLE termination in Objective mode
+# Arguments: output_text
+# Returns: 0 if IMPOSSIBLE found (and state updated), 1 otherwise
+check_objective_impossible() {
+  local output="$1"
+
+  # Only run in objective mode
+  if [ "$MODE" != "objective" ]; then
+    return 1
+  fi
+
+  # Check for <objective>IMPOSSIBLE</objective> signal
+  if ! echo "$output" | grep -qE "^[[:space:]]*<objective>IMPOSSIBLE</objective>[[:space:]]*$"; then
+    return 1
+  fi
+
+  # Extract reason from <reason>...</reason> block
+  local reason=""
+  if echo "$output" | grep -q "<reason>"; then
+    reason=$(echo "$output" | sed -n '/<reason>/,/<\/reason>/p' | sed '1d;$d' | tr '\n' ' ' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+  fi
+
+  # Extract category from <category>...</category> block (technical|scope|resource)
+  local category=""
+  if echo "$output" | grep -q "<category>"; then
+    category=$(echo "$output" | sed -n '/<category>/,/<\/category>/p' | sed '1d;$d' | tr -d '\n' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+  fi
+
+  # Update objective.json status to 'impossible' and store reason
+  if [ -f "$CONFIG_FILE" ]; then
+    # Build jq expression based on available fields
+    if [ -n "$reason" ]; then
+      jq --arg reason "$reason" '.status.state = "impossible" | .status.impossibleReason = $reason' "$CONFIG_FILE" > "$CONFIG_FILE.tmp" && mv "$CONFIG_FILE.tmp" "$CONFIG_FILE"
+    else
+      jq '.status.state = "impossible"' "$CONFIG_FILE" > "$CONFIG_FILE.tmp" && mv "$CONFIG_FILE.tmp" "$CONFIG_FILE"
+    fi
+  fi
+
+  # Print comprehensive summary (pass reason and category)
+  print_objective_summary "IMPOSSIBLE" "$reason" "$category"
+
+  return 0
+}
+
+# Check for PLATEAU termination in Objective mode (agent-signaled)
+# Arguments: output_text
+# Returns: 0 if PLATEAU found (and state updated), 1 otherwise
+check_objective_plateau() {
+  local output="$1"
+
+  # Only run in objective mode
+  if [ "$MODE" != "objective" ]; then
+    return 1
+  fi
+
+  # Check for <objective>PLATEAU</objective> signal
+  if ! echo "$output" | grep -qE "^[[:space:]]*<objective>PLATEAU</objective>[[:space:]]*$"; then
+    return 1
+  fi
+
+  # Extract attempts from <attempts>...</attempts> block
+  local attempts=""
+  if echo "$output" | grep -q "<attempts>"; then
+    attempts=$(echo "$output" | sed -n '/<attempts>/,/<\/attempts>/p' | sed '1d;$d' | tr '\n' ' ' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+  fi
+
+  # Extract suggestion from <suggestion>...</suggestion> block
+  local suggestion=""
+  if echo "$output" | grep -q "<suggestion>"; then
+    suggestion=$(echo "$output" | sed -n '/<suggestion>/,/<\/suggestion>/p' | sed '1d;$d' | tr '\n' ' ' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+  fi
+
+  # Update objective.json status to 'plateau'
+  if [ -f "$CONFIG_FILE" ]; then
+    jq '.status.state = "plateau"' "$CONFIG_FILE" > "$CONFIG_FILE.tmp" && mv "$CONFIG_FILE.tmp" "$CONFIG_FILE"
+  fi
+
+  # Print comprehensive summary (pass attempts and suggestion for agent-signaled plateau)
+  print_objective_summary "PLATEAU" "" "" "$attempts" "$suggestion"
+
+  return 0
+}
+
+# Check for MAX_ITERATIONS termination in Objective mode (agent-signaled)
+# Arguments: output_text
+# Returns: 0 if MAX_ITERATIONS found (and state updated), 1 otherwise
+check_objective_max_iterations() {
+  local output="$1"
+
+  # Only run in objective mode
+  if [ "$MODE" != "objective" ]; then
+    return 1
+  fi
+
+  # Check for <objective>MAX_ITERATIONS</objective> signal
+  if ! echo "$output" | grep -qE "^[[:space:]]*<objective>MAX_ITERATIONS</objective>[[:space:]]*$"; then
+    return 1
+  fi
+
+  # Update objective.json status to 'max_iterations'
+  if [ -f "$CONFIG_FILE" ]; then
+    jq '.status.state = "max_iterations"' "$CONFIG_FILE" > "$CONFIG_FILE.tmp" && mv "$CONFIG_FILE.tmp" "$CONFIG_FILE"
+  fi
+
+  # Print comprehensive summary
+  print_objective_summary "MAX_ITERATIONS"
+
+  return 0
+}
+
+# Check if iteration budget has been exhausted (automatic detection)
+# Arguments: current_iteration
+# Returns: 0 if max iterations reached (and state updated), 1 otherwise
+check_max_iterations_budget() {
+  local current_iteration="$1"
+
+  # Only run in objective mode
+  if [ "$MODE" != "objective" ]; then
+    return 1
+  fi
+
+  # Ensure objective.json exists
+  if [ ! -f "$CONFIG_FILE" ]; then
+    return 1
+  fi
+
+  # Read maxIterations from objective.json stopping config
+  local config_max_iterations
+  config_max_iterations=$(jq -r '.stopping.maxIterations // 0' "$CONFIG_FILE")
+
+  # If config doesn't specify maxIterations (0 or empty), don't trigger
+  if [ "$config_max_iterations" -eq 0 ]; then
+    return 1
+  fi
+
+  # Use the lower of: config maxIterations OR CLI MAX_ITERATIONS
+  local effective_max
+  if [ "$config_max_iterations" -lt "$MAX_ITERATIONS" ]; then
+    effective_max="$config_max_iterations"
+  else
+    effective_max="$MAX_ITERATIONS"
+  fi
+
+  # Check if we've reached the effective max
+  if [ "$current_iteration" -lt "$effective_max" ]; then
+    return 1
+  fi
+
+  # Max iterations reached - update state
+  jq '.status.state = "max_iterations"' "$CONFIG_FILE" > "$CONFIG_FILE.tmp" && mv "$CONFIG_FILE.tmp" "$CONFIG_FILE"
+
+  # Print comprehensive summary
+  print_objective_summary "MAX_ITERATIONS"
+
+  return 0
+}
+
+# Check for metric-based plateau (automatic detection from metric history)
+# Arguments: none (reads from CONFIG_FILE)
+# Returns: 0 if plateau detected (and state updated), 1 otherwise
+check_metric_plateau() {
+  # Only run in objective mode
+  if [ "$MODE" != "objective" ]; then
+    return 1
+  fi
+
+  # Ensure objective.json exists
+  if [ ! -f "$CONFIG_FILE" ]; then
+    return 1
+  fi
+
+  # Read plateau threshold config
+  local metric min_improvement window_size
+  metric=$(jq -r '.stopping.plateauThreshold.metric // "accuracy"' "$CONFIG_FILE")
+  min_improvement=$(jq -r '.stopping.plateauThreshold.minImprovement // 0.01' "$CONFIG_FILE")
+  window_size=$(jq -r '.stopping.plateauThreshold.windowSize // 3' "$CONFIG_FILE")
+
+  # Get the metric history array length
+  local history_length
+  history_length=$(jq '.status.metricHistory | length' "$CONFIG_FILE")
+
+  # Only trigger after at least windowSize iterations exist
+  if [ "$history_length" -lt "$window_size" ]; then
+    return 1
+  fi
+
+  # Extract the last windowSize values of the tracked metric
+  # Calculate improvement: max - min across the window
+  local window_values improvement
+  window_values=$(jq -r --arg m "$metric" --argjson n "$window_size" \
+    '[.status.metricHistory[-$n:][] | .[$m] // null | select(. != null)]' "$CONFIG_FILE")
+
+  # Count valid values in window
+  local valid_count
+  valid_count=$(echo "$window_values" | jq 'length')
+
+  # If we don't have enough valid metric values in the window, can't determine plateau
+  if [ "$valid_count" -lt "$window_size" ]; then
+    return 1
+  fi
+
+  # Calculate improvement: max - min across the window
+  local max_val min_val
+  max_val=$(echo "$window_values" | jq 'max')
+  min_val=$(echo "$window_values" | jq 'min')
+
+  # Improvement is max - min (the range of values in the window)
+  improvement=$(awk -v max="$max_val" -v min="$min_val" 'BEGIN { printf "%.6f", max - min }')
+
+  # Detect plateau when improvement < minImprovement
+  local is_plateau
+  is_plateau=$(awk -v imp="$improvement" -v thresh="$min_improvement" 'BEGIN { print (imp < thresh) ? "true" : "false" }')
+
+  if [ "$is_plateau" != "true" ]; then
+    return 1
+  fi
+
+  # Plateau detected - update state
+  jq '.status.state = "plateau"' "$CONFIG_FILE" > "$CONFIG_FILE.tmp" && mv "$CONFIG_FILE.tmp" "$CONFIG_FILE"
+
+  # Print comprehensive summary (no attempts/suggestion for metric-based plateau)
+  print_objective_summary "PLATEAU"
+
+  return 0
+}
+
+# Update objective.json with iteration metrics (Objective mode only)
+# Arguments: iteration_number metrics_json
+# Returns: 0 on success, 1 on failure
+update_objective_metrics() {
+  local iteration="$1"
+  local metrics_json="$2"
+
+  # Only run in objective mode
+  if [ "$MODE" != "objective" ]; then
+    return 0
+  fi
+
+  # Ensure objective.json exists
+  if [ ! -f "$CONFIG_FILE" ]; then
+    echo "  ⚠ Cannot update metrics: objective.json not found" >&2
+    return 1
+  fi
+
+  # 1. Increment status.iterations
+  # 2. Append to status.metricHistory with iteration number
+  # 3. Update status.bestMetrics if current is better
+
+  # Get the primary metric name for comparison
+  local primary_metric
+  primary_metric=$(jq -r '.stopping.plateauThreshold.metric // "accuracy"' "$CONFIG_FILE")
+
+  # Create the history entry with iteration number and metrics
+  local history_entry
+  if [ -n "$metrics_json" ] && [ "$metrics_json" != "{}" ]; then
+    history_entry=$(echo "$metrics_json" | jq --argjson iter "$iteration" '. + {"iteration": $iter}')
+  else
+    # No metrics - just record the iteration number
+    history_entry="{\"iteration\": $iteration}"
+  fi
+
+  # Get current best metric value (or null if not set)
+  local current_best
+  current_best=$(jq -r --arg m "$primary_metric" '.status.bestMetrics[$m] // null' "$CONFIG_FILE")
+
+  # Get new metric value from current metrics
+  local new_value
+  if [ -n "$metrics_json" ] && [ "$metrics_json" != "{}" ]; then
+    new_value=$(echo "$metrics_json" | jq -r --arg m "$primary_metric" '.[$m] // null')
+  else
+    new_value="null"
+  fi
+
+  # Determine if we should update bestMetrics
+  # Update if: current is null OR new value > current value
+  local should_update_best="false"
+  if [ "$new_value" != "null" ]; then
+    if [ "$current_best" = "null" ]; then
+      should_update_best="true"
+    else
+      # Compare numerically - new > current means improvement
+      # Use awk for floating point comparison
+      should_update_best=$(awk -v new="$new_value" -v cur="$current_best" 'BEGIN { print (new > cur) ? "true" : "false" }')
+    fi
+  fi
+
+  # Build the jq update expression
+  local jq_expr
+
+  if [ "$should_update_best" = "true" ]; then
+    # Update iterations, append to history, AND update bestMetrics
+    jq_expr='.status.iterations = ($iter | tonumber) | .status.metricHistory += [$entry] | .status.bestMetrics = $metrics'
+    jq --argjson iter "$iteration" \
+       --argjson entry "$history_entry" \
+       --argjson metrics "$metrics_json" \
+       "$jq_expr" \
+       "$CONFIG_FILE" > "$CONFIG_FILE.tmp" && mv "$CONFIG_FILE.tmp" "$CONFIG_FILE"
+  else
+    # Update iterations and append to history only
+    jq_expr='.status.iterations = ($iter | tonumber) | .status.metricHistory += [$entry]'
+    jq --argjson iter "$iteration" \
+       --argjson entry "$history_entry" \
+       "$jq_expr" \
+       "$CONFIG_FILE" > "$CONFIG_FILE.tmp" && mv "$CONFIG_FILE.tmp" "$CONFIG_FILE"
+  fi
+
+  if [ $? -eq 0 ]; then
+    echo "  ✓ Updated objective.json: iteration=$iteration, bestUpdated=$should_update_best"
+    return 0
+  else
+    echo "  ⚠ Failed to update objective.json" >&2
+    return 1
+  fi
 }
 
 # Extract and write skill candidate from iteration output
@@ -314,7 +993,7 @@ fi
 # Configure Angainor profile (disable interfering plugins) before main loop
 configure_angainor_profile
 
-echo "Starting Angainor - Max iterations: $MAX_ITERATIONS"
+echo "Starting Angainor in $MODE_DISPLAY mode - Max iterations: $MAX_ITERATIONS"
 
 for i in $(seq 1 $MAX_ITERATIONS); do
   echo ""
@@ -349,9 +1028,9 @@ for i in $(seq 1 $MAX_ITERATIONS); do
     fi
 
     if [ -n "$TIMEOUT_CMD" ]; then
-      OUTPUT=$($TIMEOUT_CMD claude --dangerously-skip-permissions --print < "$SCRIPT_DIR/prompt.md" 2>&1 | tee /dev/stderr "$TRANSCRIPT_FILE") || true
+      OUTPUT=$($TIMEOUT_CMD claude --dangerously-skip-permissions --print < "$PROMPT_FILE" 2>&1 | tee /dev/stderr "$TRANSCRIPT_FILE") || true
     else
-      OUTPUT=$(claude --dangerously-skip-permissions --print < "$SCRIPT_DIR/prompt.md" 2>&1 | tee /dev/stderr "$TRANSCRIPT_FILE") || true
+      OUTPUT=$(claude --dangerously-skip-permissions --print < "$PROMPT_FILE" 2>&1 | tee /dev/stderr "$TRANSCRIPT_FILE") || true
     fi
     CLAUDE_EXIT_CODE=$?
 
@@ -514,6 +1193,57 @@ EOF
 
   # Record successful iteration metrics
   record_metrics "success" "$STORY_ID" ""
+
+  # For Objective mode: extract metrics and update objective.json
+  if [ "$MODE" = "objective" ]; then
+    EXTRACTED_METRICS=$(extract_metrics "$OUTPUT")
+    if [ -n "$EXTRACTED_METRICS" ]; then
+      echo "  Extracted metrics: $EXTRACTED_METRICS"
+    fi
+    update_objective_metrics "$i" "$EXTRACTED_METRICS"
+
+    # Check for SUCCESS termination signal
+    if check_objective_success "$OUTPUT"; then
+      record_metrics "success" "OBJECTIVE_SUCCESS" ""
+      print_metrics_summary
+      exit 0
+    fi
+
+    # Check for IMPOSSIBLE termination signal
+    if check_objective_impossible "$OUTPUT"; then
+      record_metrics "blocked" "OBJECTIVE_IMPOSSIBLE" "Agent determined objective is impossible"
+      print_metrics_summary
+      exit 2
+    fi
+
+    # Check for PLATEAU termination signal (agent-signaled diminishing returns)
+    if check_objective_plateau "$OUTPUT"; then
+      record_metrics "blocked" "OBJECTIVE_PLATEAU" "Agent signaled diminishing returns"
+      print_metrics_summary
+      exit 3
+    fi
+
+    # Check for metric-based plateau (automatic detection from metric history)
+    if check_metric_plateau; then
+      record_metrics "blocked" "METRIC_PLATEAU" "No metric improvement in sliding window"
+      print_metrics_summary
+      exit 3
+    fi
+
+    # Check for MAX_ITERATIONS termination signal (agent-signaled)
+    if check_objective_max_iterations "$OUTPUT"; then
+      record_metrics "blocked" "OBJECTIVE_MAX_ITERATIONS" "Agent signaled iteration budget exhausted"
+      print_metrics_summary
+      exit 4
+    fi
+
+    # Check for automatic max iterations budget exhaustion
+    if check_max_iterations_budget "$i"; then
+      record_metrics "blocked" "MAX_ITERATIONS_BUDGET" "Reached iteration limit from config"
+      print_metrics_summary
+      exit 4
+    fi
+  fi
 
   # Extract skill candidates from iteration output (failures don't break loop)
   write_skill_candidate "$OUTPUT" "$STORY_ID" || true

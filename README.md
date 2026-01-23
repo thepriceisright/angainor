@@ -13,6 +13,7 @@ Based on [Geoffrey Huntley's Ralph pattern](https://ghuntley.com/ralph/).
 - [Why Angainor?](#why-angainor)
 - [Quick Start](#quick-start)
 - [How It Works](#how-it-works)
+- [Objective Mode](#objective-mode)
 - [Advanced Features](#advanced-features)
 - [Key Concepts](#key-concepts)
 - [Skills](#skills)
@@ -70,6 +71,10 @@ This installs:
 
 ### Basic Usage
 
+Angainor supports two modes: **PRD Mode** (default) for well-defined tasks, and **Objective Mode** for goal-driven exploration.
+
+#### PRD Mode (default)
+
 1. **Create a PRD** using the `/prd` skill:
 
 ```bash
@@ -91,9 +96,32 @@ claude
 3. **Run Angainor**:
 
 ```bash
-./angainor.sh          # Run with default 10 iterations
-./angainor.sh 20       # Run with custom iteration limit
+./angainor.sh              # Run with default 10 iterations
+./angainor.sh 20           # Run with custom iteration limit
+./angainor.sh --prd 20     # Explicit PRD mode
 ```
+
+#### Objective Mode
+
+1. **Define an objective** using the `/objective` skill:
+
+```bash
+claude
+# In Claude session:
+/objective
+# Answer questions about your goal, metrics, and constraints
+```
+
+2. **Run Angainor in Objective Mode**:
+
+```bash
+./angainor.sh --objective          # Run with default max iterations
+./angainor.sh --objective 15       # Run with custom iteration limit
+```
+
+See [Objective Mode](#objective-mode) section for detailed documentation.
+
+#### Monitoring Progress
 
 4. **Monitor progress**:
    - Watch console output for real-time status
@@ -174,6 +202,170 @@ Angainor maintains context across stateless iterations through four memory layer
 - progress.txt explains WHY and documents learnings
 - prd.json tracks WHERE we are
 - transcripts provide deep HOW context when needed
+
+---
+
+## Objective Mode
+
+Objective Mode is an alternative execution mode for **goal-driven exploration** when the approach is unknown upfront. Instead of executing predefined user stories, the agent iterates toward a measurable goal through experimentation.
+
+### When to Use Objective Mode
+
+| Use PRD Mode (default) | Use Objective Mode |
+|------------------------|-------------------|
+| Tasks are well-defined with clear acceptance criteria | Goal is measurable but approach is unknown |
+| Implementation approach is known upfront | Requires experimentation to find solutions |
+| Examples: Add feature X, Fix bug Y, Refactor module Z | Examples: Improve accuracy to 90%, Reduce latency to <100ms |
+
+### Two-Phase Workflow
+
+Objective Mode uses a **two-phase workflow**:
+
+```
+┌───────────────────────────────────────────────────────┐
+│  PHASE 1: Interactive Planning                        │
+│  Run: /objective skill in Claude Code                 │
+├───────────────────────────────────────────────────────┤
+│  1. Answer clarifying questions about your goal       │
+│  2. Review proposed verification method               │
+│  3. Adjust stopping conditions if needed              │
+│  4. Approve → generates objective.json                │
+└───────────────────┬───────────────────────────────────┘
+                    │
+                    ▼
+┌───────────────────────────────────────────────────────┐
+│  PHASE 2: Autonomous Execution                        │
+│  Run: ./angainor.sh --objective [max_iterations]      │
+├───────────────────────────────────────────────────────┤
+│  Loop until termination:                              │
+│  1. Read objective.json and progress.txt              │
+│  2. Form hypothesis based on current state            │
+│  3. Implement and verify the hypothesis               │
+│  4. Output metrics in <metrics> block                 │
+│  5. Evaluate: improve, pivot, or terminate            │
+│  6. Loop continues until stopping condition met       │
+└───────────────────────────────────────────────────────┘
+```
+
+### Quick Start (Objective Mode)
+
+**1. Define your objective** using the `/objective` skill:
+
+```bash
+claude
+# In Claude session:
+/objective
+# Answer questions about your goal, metrics, and constraints
+```
+
+**2. Run Angainor in Objective Mode**:
+
+```bash
+./angainor.sh --objective          # Run with default max iterations
+./angainor.sh --objective 15       # Run with custom iteration limit
+```
+
+**3. Monitor progress**:
+- Watch console for iteration metrics and trend analysis
+- Check `objective.json` for `status.metricHistory`
+- Review `progress.txt` for experiment learnings
+
+### Termination Conditions
+
+Objective Mode has four termination conditions:
+
+| Signal | Exit Code | Meaning |
+|--------|-----------|---------|
+| `SUCCESS` | 0 | Objective achieved - `successCriteria` expression is true |
+| `IMPOSSIBLE` | 2 | Agent determines objective cannot be achieved (with evidence) |
+| `PLATEAU` | 3 | Diminishing returns - no improvement across window of iterations |
+| `MAX_ITERATIONS` | 4 | Iteration budget exhausted without success |
+
+**Example termination output:**
+
+```
+═══════════════════════════════════════════════════════
+  OBJECTIVE SUCCESS - Goal Achieved! 🎉
+═══════════════════════════════════════════════════════
+  Iterations:    7
+  Best Metrics:  accuracy: 0.912, f1_score: 0.895
+  Trend:         Improving (+0.132 from start)
+
+  Success Criteria Met:
+    accuracy >= 0.90 ✓
+═══════════════════════════════════════════════════════
+```
+
+### Example objective.json
+
+```json
+{
+  "objective": {
+    "description": "Improve image classification accuracy to 90% or higher",
+    "context": "Current model achieves 78% accuracy. Users report misclassifications on edge cases.",
+    "constraints": [
+      "Must not increase inference time beyond 200ms per image",
+      "Model size must stay under 500MB"
+    ]
+  },
+  "verification": {
+    "command": "python scripts/benchmark_accuracy.py --dataset validation",
+    "successCriteria": "accuracy >= 0.90",
+    "metricsToTrack": ["accuracy", "precision", "recall", "f1_score", "inference_time_ms"]
+  },
+  "stopping": {
+    "maxIterations": 15,
+    "plateauThreshold": {
+      "metric": "accuracy",
+      "minImprovement": 0.01,
+      "windowSize": 3
+    },
+    "maxConsecutiveFailures": 3
+  },
+  "status": {
+    "state": "pending",
+    "iterations": 0,
+    "bestMetrics": {},
+    "metricHistory": []
+  }
+}
+```
+
+### Key Differences from PRD Mode
+
+| Aspect | PRD Mode | Objective Mode |
+|--------|----------|----------------|
+| **Input** | `prd.json` with user stories | `objective.json` with goal and metrics |
+| **Progress** | Story-by-story (US-001, US-002...) | Metric-by-metric (accuracy: 0.78 → 0.85 → 0.90) |
+| **Commits** | `feat: US-001 - Story Title` | `exp: Iteration N - Hypothesis description` |
+| **Termination** | All stories pass | Success criteria met, plateau, or budget exhausted |
+| **Memory** | What was implemented | What was tried and what worked |
+
+### Use Cases
+
+**Performance optimization:**
+```bash
+# Reduce API latency to under 100ms
+./angainor.sh --objective 12
+```
+
+**Model accuracy improvement:**
+```bash
+# Achieve 90% accuracy on test dataset
+./angainor.sh --objective 15
+```
+
+**Test coverage goals:**
+```bash
+# Reach 80% line coverage
+./angainor.sh --objective 10
+```
+
+**Code quality metrics:**
+```bash
+# Reduce cyclomatic complexity below 10
+./angainor.sh --objective 8
+```
 
 ---
 
@@ -443,7 +635,7 @@ Consolidate reusable patterns at the **top** in a `## Codebase Patterns` section
 
 ## Skills
 
-Angainor includes three built-in skills for the PRD workflow:
+Angainor includes four built-in skills for the PRD and Objective workflows:
 
 ### `/prd` - PRD Generator
 
@@ -495,6 +687,30 @@ Angainor includes three built-in skills for the PRD workflow:
 2. Backend logic / server actions
 3. UI components
 4. Aggregate views / dashboards
+
+### `/objective` - Objective Definition
+
+**Description:** Interactive skill that helps define a measurable objective through guided questions.
+
+**Triggers:** `define an objective`, `create objective.json`, `set up objective mode`, `/objective`
+
+**Process:**
+1. Ask clarifying questions about goal type, target, and constraints
+2. Propose verification method and metrics to track
+3. Suggest stopping conditions with sensible defaults
+4. Present complete plan for approval
+5. Generate `objective.json` after user approval
+
+**Output sections:**
+- Objective (description, context, constraints)
+- Verification (command, success criteria, metrics)
+- Stopping conditions (max iterations, plateau threshold, failure limit)
+
+**Key features:**
+- Type-specific defaults (performance, accuracy, coverage, quality)
+- Offers to create benchmark scripts if none exist
+- User can adjust any part of the proposal before approval
+- Explains each stopping parameter in plain language
 
 ### `/read-transcript` - Transcript Search
 
@@ -613,6 +829,7 @@ The installer adds these entries to `.gitignore`:
 ```gitignore
 # Angainor generated files
 prd.json
+objective.json
 progress.txt
 .last-branch
 transcripts/
@@ -628,16 +845,20 @@ After installation:
 your-project/
 ├── .angainor/                    # Angainor internals (commit this)
 │   ├── angainor.sh              # Main loop script
-│   ├── prompt.md                # Agent instructions
-│   ├── prd.json.example         # Format reference
+│   ├── prompt.md                # PRD mode agent instructions
+│   ├── objective-prompt.md      # Objective mode agent instructions
+│   ├── prd.json.example         # PRD format reference
+│   ├── objective.json.example   # Objective format reference
 │   ├── skills/                  # Claude Code skills
 │   │   ├── prd/
 │   │   ├── angainor/
+│   │   ├── objective/           # Objective definition skill
 │   │   └── read-transcript/
 │   └── scripts/
 │       └── migrate-prd.sh
 ├── angainor.sh                   # Wrapper script (commit this)
 ├── prd.json                      # Current PRD (generated, ignored)
+├── objective.json                # Current objective (generated, ignored)
 ├── progress.txt                  # Learning log (generated, ignored)
 ├── transcripts/                  # Iteration logs (generated, ignored)
 ├── screenshots/                  # Browser verification (generated, ignored)
@@ -856,9 +1077,11 @@ Iteration 1 complete. Continuing...
 | File | Purpose | Modified By |
 |------|---------|-------------|
 | `.angainor/angainor.sh` | Main loop spawning Claude instances | Human (rarely) |
-| `.angainor/prompt.md` | Instructions for each iteration | Human (customize) |
+| `.angainor/prompt.md` | PRD mode iteration instructions | Human (customize) |
+| `.angainor/objective-prompt.md` | Objective mode iteration instructions | Human (customize) |
 | `angainor.sh` | Wrapper script | Generated by installer |
-| `prd.json` | User stories with status | Angainor |
+| `prd.json` | User stories with status (PRD mode) | Angainor |
+| `objective.json` | Goal and metrics (Objective mode) | Angainor |
 | `progress.txt` | Append-only learnings | Angainor |
 | `transcripts/` | Full iteration logs | Angainor |
 | `transcripts/index.json` | Searchable transcript index | Angainor |

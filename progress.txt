@@ -1,120 +1,379 @@
-# Ralph Progress Log
-Started: Tue Jan 20 11:35:52 AM CET 2026
+# Angainor Progress Log
+Started: Fri Jan 23 09:16:11 AM CET 2026
 ---
 
-## 2026-01-20 - US-001
-Story: US-001 - Add skill extraction instructions to prompt.md
-- Added "Skill Extraction (Claudeception)" section to prompt.md (45 lines)
-- Documented all 4 quality gates (non-obvious, reusable, verified, specific trigger)
-- Documented when NOT to extract (4 cases)
-- Documented the 3 categories (error-resolutions, patterns, workflows)
-- Documented <<<SKILL_CANDIDATE>>> output format with all required fields
-- Files changed: prompt.md
+## 2026-01-23 - US-001
+Story: US-001 - Add --objective and --prd flags to angainor.sh
+- Added command-line argument parsing with while loop and case statement
+- MODE variable defaults to "prd", set to "objective" with --objective flag
+- CONFIG_FILE and PROMPT_FILE set based on mode (prd.json/prompt.md or objective.json/objective-prompt.md)
+- MODE_DISPLAY variable ("PRD" or "OBJECTIVE") used in startup message
+- Error messages guide user when config files are missing
+- Backward compatibility preserved: no flags = PRD mode, numeric arg = max_iterations
+- Files changed: angainor.sh
 - **Learnings for future iterations:**
-  - Section placement matters: added after "Before Marking Story Complete" since skill extraction is part of the completion workflow
-  - The delimiter-based format (<<<SKILL_CANDIDATE>>>) is intentionally chosen for reliable bash parsing
+  - Use `while [[ $# -gt 0 ]]; do case $1 in ... esac; shift; done` pattern for argument parsing
+  - CONFIG_FILE is the active config, PRD_FILE kept as legacy alias for backward compatibility
+  - PROMPT_FILE defined but not yet used - will be integrated in US-004
 ---
 
-## 2026-01-20 - US-002
-Story: US-002 - Add write_skill_candidate function to ralph.sh
-- Added SKILL_DIR constant at line 17 pointing to ~/.claude/skills/ralph-learnings
-- Added write_skill_candidate() function (lines 142-233, ~90 lines)
-- Function extracts all fields: category, name, description, content using sed/grep
-- Validates all required fields are present with specific error messages
-- Validates category against allowed list (error-resolutions, patterns, workflows)
-- Skips gracefully if no block found (returns 0) or if malformed/invalid (returns 1 with warning)
-- Checks for existing skill files and refuses to overwrite
-- Files changed: ralph.sh
+## 2026-01-23 - US-002
+Story: US-002 - Create objective.json schema and example
+- Created objective.json.example with complete schema for Objective Mode
+- Schema sections: objective (description, context, constraints), verification (command, successCriteria, metricsToTrack), stopping (maxIterations, plateauThreshold, maxConsecutiveFailures), status (state, iterations, bestMetrics, metricHistory)
+- Used realistic ML model accuracy improvement example (not placeholder text)
+- Files changed: objective.json.example (new file)
 - **Learnings for future iterations:**
-  - shellcheck SC2317 warnings for functions are false positives when functions are called via traps or in future stories
-  - The function already writes skill files (includes lines 208-232) since US-003 file writing is naturally part of the same function
-  - For multiline content extraction, use `sed -n '/pattern/,/endpattern/p' | sed '1d;$d'` to get everything between markers
+  - Use jq for JSON validation: `jq '.' file.json > /dev/null && echo "valid"`
+  - Use jq boolean queries to check schema: `jq 'has("field") and (.field | has("subfield"))'`
+  - plateauThreshold nested structure: metric (string), minImprovement (float), windowSize (int)
+  - metricHistory is an array that grows with each iteration
 ---
 
-## 2026-01-20 - US-003
-Story: US-003 - Write skill files with correct format
-- All acceptance criteria already satisfied by US-002 implementation
-- Verified: mkdir -p creates category subdirectories (line 209)
-- Verified: YAML frontmatter with only name and description fields (lines 216-220)
-- Verified: Description preserved exactly as provided (lines 168, 219)
-- Verified: Content body preserved (lines 171, 222)
-- Verified: Origin section with timestamp, project, story ID (lines 224-228)
-- Verified: Success message matches required format (line 231)
-- Verified: shellcheck passes (no errors, only info-level warnings)
-- Files changed: None (already implemented in US-002)
+## 2026-01-23 - US-003
+Story: US-003 - Create objective-prompt.md agent instructions
+- Created objective-prompt.md (280 lines) with complete Objective Mode agent instructions
+- Includes: task workflow (read objective.json → hypothesis → implement → verify → evaluate)
+- Includes: termination signals (SUCCESS, IMPOSSIBLE, PLATEAU, MAX_ITERATIONS)
+- Includes: <metrics> output block format (JSON and key-value alternatives)
+- Includes: constraint enforcement with violation recovery section
+- Includes: progress.txt format for objective iterations with Hypothesis/Changes/Result/Evaluation/Next direction
+- Includes: iteration strategy (early explore, middle exploit, late finalize)
+- Files changed: objective-prompt.md (new file)
 - **Learnings for future iterations:**
-  - When PRD stories have natural dependencies, earlier stories may implement functionality needed by later stories
-  - US-002 and US-003 were logically a single function - splitting them in the PRD is fine for planning, but implementation naturally combined them
+  - Objective Mode uses `exp:` commit prefix instead of `feat:` for experiments
+  - <metrics> block supports both JSON and key-value format for flexibility
+  - Termination signals include context blocks: <reason>, <category>, <attempts>, <suggestion>
+  - Constraints section is critical - violations are worse than failed experiments
 ---
 
-## 2026-01-20 - US-004
-Story: US-004 - Integrate extraction into main loop
-- Added call to write_skill_candidate at ralph.sh line 395
-- Placed after record_metrics "success" line (line 392)
-- Uses `|| true` to prevent extraction failures from breaking main loop
-- Passes both $OUTPUT and $STORY_ID as arguments
-- Files changed: ralph.sh
+## 2026-01-23 - US-004
+Story: US-004 - Select config and prompt files based on mode
+- Changed hardcoded `$SCRIPT_DIR/prompt.md` to `$PROMPT_FILE` in Claude command calls
+- Added prompt file validation with mode-specific error messages
+- PRD mode: uses prd.json and prompt.md (existing behavior)
+- Objective mode: uses objective.json and objective-prompt.md
+- All paths resolved via $SCRIPT_DIR (absolute path to script directory)
+- Files changed: angainor.sh
 - **Learnings for future iterations:**
-  - The `|| true` pattern prevents `set -e` from exiting on non-zero return codes
-  - Unconditional extraction on success is simpler than flag-based control
+  - PROMPT_FILE was already defined in US-001 but not actually used - needed to wire it into the Claude invocation
+  - Config and prompt files share the same resolution pattern (script directory as base)
+  - Shellcheck SC2317 warnings for trap handlers are expected (invoked indirectly)
 ---
 
-## 2026-01-20 - US-005
-Story: US-005 - Test bash extraction with valid input
-- Created test script scripts/test-skill-extraction.sh (415 lines)
-- Tests valid skill extraction with 4 test functions:
-  - test_valid_extraction: verifies all fields extracted, directory/file created, frontmatter correct, content preserved, origin section present
-  - test_directory_structure: verifies all 3 category directories created correctly
-  - test_yaml_frontmatter: verifies exactly 2 fields (name, description), no category field
-  - test_multiline_content: verifies sections, code blocks, lists, multi-paragraph text preserved
-- All 31 assertions pass, shellcheck passes with no warnings
-- Files changed: scripts/test-skill-extraction.sh
+## 2026-01-23 - US-005
+Story: US-005 - Extract metrics from agent output
+- Created extract_metrics() function to parse <metrics>...</metrics> blocks from agent output
+- Supports JSON format: {"accuracy": 0.85, "loss": 0.42}
+- Supports key-value format: accuracy=0.85 (one per line)
+- Returns compacted JSON string for jq processing
+- Gracefully handles: missing block, malformed block, invalid JSON (warns to stderr, returns empty string)
+- Files changed: angainor.sh
 - **Learnings for future iterations:**
-  - When using grep -qF with patterns that start with `-`, use `grep -qF -- "$pattern"` to prevent interpretation as options
-  - In bash, avoid `(())` arithmetic with set -e when the value could be 0 (returns non-zero exit); use `VAR=$((VAR + 1))` instead
-  - Use shellcheck disable comments for expected false positives: SC2317 (trap functions), SC2034 (eval'd function vars), SC2016 (intentional literal strings)
+  - Use `sed -n '/<tag>/,/<\/tag>/p'` to extract XML-like blocks
+  - BASH_REMATCH array captures regex groups in bash: `[[ "$line" =~ ^pattern$ ]]`
+  - Use jq --argjson for numeric values, --arg for string values
+  - SC2317 shellcheck warnings are expected for functions not yet called in main code
 ---
 
-## 2026-01-20 - US-006
-Story: US-006 - Test bash extraction edge cases
-- Extended scripts/test-skill-extraction.sh with 4 edge case test functions:
-  - test_missing_block: verifies function returns 0 with no output when no skill block present
-  - test_malformed_block: verifies warnings for missing category, name, description, content, and end delimiter
-  - test_invalid_category: verifies warnings for invalid and typo categories
-  - test_duplicate_skill: verifies warning and no overwrite when skill already exists
-- Added helper assertions: assert_file_not_exists, assert_exit_code, assert_output_empty
-- All 60 assertions pass, shellcheck passes with no errors
-- Files changed: scripts/test-skill-extraction.sh
+## 2026-01-23 - US-006
+Story: US-006 - Update objective.json with iteration metrics
+- Created update_objective_metrics() function to persist metrics after each Objective mode iteration
+- Increments status.iterations counter with current iteration number
+- Appends metrics to status.metricHistory array with iteration number
+- Updates status.bestMetrics when primary metric (from stopping.plateauThreshold.metric) improves
+- Uses awk for floating point comparison (new > current means improvement)
+- Integrated into main loop after successful verification (Objective mode only)
+- Files changed: angainor.sh
 - **Learnings for future iterations:**
-  - With `set -e`, capturing exit codes from functions that return non-zero requires `cmd && exit_code=0 || exit_code=$?` pattern
-  - The standard `result=$(cmd); exit_code=$?` pattern causes early script exit with `set -e`
+  - Use awk for floating point comparison: `awk -v new="$new" -v cur="$cur" 'BEGIN { print (new > cur) ? "true" : "false" }'`
+  - jq --argjson passes JSON objects/arrays directly; use for metrics_json
+  - Check for empty string AND empty object "{}" when handling missing metrics
+  - Pattern: write to .tmp file then mv to avoid corrupting original on failure
 ---
 
-## 2026-01-20 - US-007
-Story: US-007 - Document auto-learning in CLAUDE.md
-- Added "Skill Extraction (Claudeception)" subsection under Key Patterns (18 lines)
-- Documented all 4 quality gates briefly: non-obvious, reusable, verified, specific trigger
-- Documented output format with all required fields
-- Documented storage location and 3 categories on combined line
-- Noted cross-project learning benefit at start and end of section
-- Files changed: CLAUDE.md
+## 2026-01-23 - US-007
+Story: US-007 - Implement SUCCESS termination check
+- Created check_objective_success() function to detect <objective>SUCCESS</objective> in agent output
+- Uses anchored grep pattern (same as PRD mode COMPLETE check) to avoid false positives
+- Updates objective.json status.state to 'success' using jq
+- Prints success banner with iteration count and bestMetrics
+- Integrates into main loop after metrics extraction, calls exit 0 on success
+- Files changed: angainor.sh
 - **Learnings for future iterations:**
-  - Combining related info on single lines (e.g., Categories | Storage) helps meet line count limits
-  - Line count requirements should include blank lines between sections
+  - Use anchored grep for XML signal detection: `^[[:space:]]*<tag>value</tag>[[:space:]]*$`
+  - Termination checks go after update_objective_metrics() so final metrics are available
+  - Follow pattern: detect signal → update state → print message → record metrics → exit
 ---
 
-## 2026-01-20 - US-008
-Story: US-008 - End-to-end integration test
-- Created scripts/test-e2e-skill-extraction.sh (450 lines)
-- Tests complete flow: mock Ralph iteration output → skill extraction → file on disk
-- 3 test functions: test_e2e_integration, test_multiple_categories, test_cleanup
-- Validates all 7 acceptance criteria with 26 assertions
-- Verifies YAML frontmatter, content preservation, Origin section, directory structure
-- Tests all 3 categories: error-resolutions, patterns, workflows
-- Uses temp directories for isolation, cleanup via trap on EXIT
-- Files changed: scripts/test-e2e-skill-extraction.sh
+## 2026-01-23 - US-008
+Story: US-008 - Implement IMPOSSIBLE termination check
+- Created check_objective_impossible() function following check_objective_success() pattern
+- Uses anchored grep pattern for XML signal detection: ^[[:space:]]*<objective>IMPOSSIBLE</objective>[[:space:]]*$
+- Extracts <reason> and <category> blocks using sed -n '/<tag>/,/<\/tag>/p'
+- Updates objective.json: status.state = "impossible", status.impossibleReason = extracted reason
+- Prints banner with Category, Reason, and iteration count
+- Integrated into main loop after SUCCESS check, exits with code 2
+- Files changed: angainor.sh
 - **Learnings for future iterations:**
-  - E2E tests should simulate realistic iteration output (verification blocks, story structure)
-  - Mock PRD file needed for testing functions that read project metadata
-  - Testing file cleanup verification: check artifacts exist before trap-based cleanup runs
+  - Follow established pattern for termination checks: detect signal → update state → print message → exit
+  - Use consistent exit codes: 0=SUCCESS, 2=IMPOSSIBLE (3 and 4 reserved for PLATEAU and MAX_ITERATIONS)
+  - Extract multiline XML blocks with sed, collapse newlines with tr '\n' ' ' for single-line output
+---
+
+## 2026-01-23 - US-009
+Story: US-009 - Implement PLATEAU termination check (agent-signaled)
+- Created check_objective_plateau() function following established termination check pattern
+- Uses anchored grep pattern for XML signal detection: ^[[:space:]]*<objective>PLATEAU</objective>[[:space:]]*$
+- Extracts <attempts> and <suggestion> blocks using sed -n '/<tag>/,/<\/tag>/p' pattern
+- Updates objective.json: status.state = "plateau"
+- Prints banner with "OBJECTIVE PLATEAU - Diminishing Returns Detected", attempts, and suggestion
+- Integrated into main loop after IMPOSSIBLE check, exits with code 3
+- Files changed: angainor.sh
+- **Learnings for future iterations:**
+  - Exit codes are now: 0=SUCCESS, 2=IMPOSSIBLE, 3=PLATEAU (4 reserved for MAX_ITERATIONS)
+  - PLATEAU differs from IMPOSSIBLE: PLATEAU means "tried multiple approaches, none improving" vs "fundamentally cannot be done"
+  - All termination checks follow same pattern: detect signal → update state → print message → exit
+---
+
+## 2026-01-23 - US-010
+Story: US-010 - Implement metric-based plateau detection
+- Created check_metric_plateau() function for automatic plateau detection from metric history
+- Reads stopping.plateauThreshold config: metric, minImprovement, windowSize
+- Uses jq array slicing `[-$n:]` to extract last N iterations from metricHistory
+- Calculates improvement as max-min across the window (range of values)
+- Detects plateau when improvement < minImprovement threshold
+- Only triggers after at least windowSize iterations exist in history
+- Uses awk for floating point comparison (same pattern as update_objective_metrics)
+- Updates status.state to 'plateau' and prints detailed message
+- Integrated into main loop after agent-signaled PLATEAU check, exits with code 3
+- Files changed: angainor.sh
+- **Learnings for future iterations:**
+  - jq array slicing: `[-$n:]` gets last N elements; must use --argjson for numeric N
+  - Two types of plateau: agent-signaled (explicit) and metric-based (automatic)
+  - Metric-based plateau uses max-min (range) to detect stagnation, not sequential comparison
+  - Both plateau types use same exit code (3) but different record_metrics labels (OBJECTIVE_PLATEAU vs METRIC_PLATEAU)
+---
+
+## 2026-01-23 - US-011
+Story: US-011 - Implement MAX_ITERATIONS termination
+- Created check_objective_max_iterations() function for agent-signaled MAX_ITERATIONS detection
+- Created check_max_iterations_budget() function for automatic budget exhaustion detection
+- Uses anchored grep pattern for XML signal detection (same pattern as other termination checks)
+- Computes effective max as min(CLI MAX_ITERATIONS, config stopping.maxIterations)
+- Updates status.state to 'max_iterations' in objective.json
+- Prints banner with iteration count and best metrics achieved
+- Both checks integrated into main loop after METRIC_PLATEAU check, exit with code 4
+- Files changed: angainor.sh
+- **Learnings for future iterations:**
+  - Exit codes are now: 0=SUCCESS, 2=IMPOSSIBLE, 3=PLATEAU, 4=MAX_ITERATIONS
+  - Two types of MAX_ITERATIONS: agent-signaled (explicit) and automatic (budget check)
+  - Automatic check compares current iteration against lower of CLI arg and config value
+  - Pattern: check config value exists (not 0) before comparing against it
+---
+
+## 2026-01-23 - US-012
+Story: US-012 - Print objective summary on completion
+- Created print_objective_summary() function (lines 311-494) for comprehensive termination summaries
+- Handles all four termination reasons: SUCCESS, IMPOSSIBLE, PLATEAU, MAX_ITERATIONS
+- Common stats section: iterations completed, metric trend (improving/flat/declining), best metrics
+- Trend calculation: compares first and last metric values using awk for floating point comparison
+- SUCCESS-specific: shows success criteria, tracked metrics, final metric values using jq to_entries
+- IMPOSSIBLE-specific: shows category and reason (from both function args and stored impossibleReason)
+- PLATEAU-specific: shows window size, primary metric, stagnant iterations using jq array slicing
+- MAX_ITERATIONS-specific: shows config vs CLI limits, progress towards success criteria
+- Refactored all termination checks to use print_objective_summary() instead of inline print statements
+- Files changed: angainor.sh
+- **Learnings for future iterations:**
+  - Use awk for floating point diff calculation: `awk -v last="$val" -v first="$val" 'BEGIN { printf "%.6f", last - first }'`
+  - Pattern for trend detection: diff > 0.01 = improving, diff < -0.01 = declining, else flat
+  - jq `to_entries[] | "\(.key): \(.value)"` is useful for pretty-printing JSON objects
+  - jq `[-$n:][]` slices last N elements from array (requires --argjson for numeric n)
+  - Pass context through function params: print_objective_summary "REASON" "$context" "$category" "$attempts" "$suggestion"
+---
+
+## 2026-01-23 - US-013
+Story: US-013 - Create /objective skill with clarifying questions
+- Created skills/objective/SKILL.md (366 lines) with interactive objective definition workflow
+- Includes 5 main clarifying questions: Objective Type, Target Component, Current State, Target Value, Constraints
+- Questions use lettered multiple-choice format (A, B, C, D, E...) for quick selection
+- Adapts follow-up questions based on objective type (Performance, Accuracy, Coverage, Quality)
+- Supports free-form answers via "Other: [please specify]" options and explicit free-form Question 3
+- Includes Step 2 (Verification Approach), Step 3 (Stopping Conditions), Step 4 (Generate objective.json)
+- Files changed: skills/objective/SKILL.md (new file)
+- **Learnings for future iterations:**
+  - Skills follow YAML frontmatter pattern: `---\nname: ...\ndescription: "..."\n---`
+  - Use lettered options for quick user responses: "1A, 2C, 3B" format
+  - Include "Other: [please specify]" option to handle custom requirements
+  - Adapt questions based on earlier answers (type-specific follow-ups)
+  - Present complete summary before writing files, wait for explicit approval
+---
+
+## 2026-01-23 - US-014
+Story: US-014 - Implement verification approach proposal
+- Enhanced Step 2 of /objective skill with type-specific verification proposals
+- Added verification command templates for Performance (A), Accuracy (B), Coverage (C), Quality (D) objectives
+- Added explicit "create benchmark for me" option (Option B) in each verification type section
+- Added "Offer to Create Benchmark Scripts" section with acknowledgment flow
+- Added type-specific metrics recommendations (4 metrics per type with primary metric marked)
+- Added success criteria examples with type-specific expressions
+- Added "User Adjustment Summary" table for reviewing/modifying proposals
+- Files changed: skills/objective/SKILL.md (+167 lines)
+- **Learnings for future iterations:**
+  - Step 2 was already present from US-013 but needed type-specific content
+  - Use lettered options (A, B, C, D) consistently for multiple-choice questions
+  - Mark recommended options with "(Recommended)" suffix
+  - Primary metric in metrics list should match success criteria metric
+---
+
+## 2026-01-23 - US-015
+Story: US-015 - Implement stopping conditions proposal
+- Enhanced Step 3 of /objective skill with type-specific stopping condition defaults
+- Added maxIterations defaults table by objective type (Performance=12, Accuracy=15, Coverage=10, Quality=10, Other=15)
+- Added lettered adjustment options (A/B/C/D/E) for each stopping parameter
+- Added plateau detection section with concrete example (0.85 → 0.851 → 0.852)
+- Added consecutive failures section with explanations
+- Added stopping conditions summary table for final review
+- Added comprehensive plain language explanations with emoji icons
+- Added "Handling User Adjustments" section for adjustment workflow
+- Files changed: skills/objective/SKILL.md (+118 lines, -21 lines)
+- **Learnings for future iterations:**
+  - Use tables for presenting type-specific defaults (easy scanning)
+  - Lettered options work well for multi-parameter adjustments ("B, C, A" format)
+  - Concrete examples are more helpful than abstract explanations (0.85 → 0.851)
+  - Include estimated behavior (best/typical/worst case) to set expectations
+---
+
+## 2026-01-23 - US-016
+Story: US-016 - Generate objective.json after approval
+- Enhanced Step 4 of /objective skill with explicit approval workflow
+- Added "CRITICAL" guard requiring user approval BEFORE file creation
+- Added "Handling User Responses" section with adjust/no/yes handling
+- Listed explicit approval triggers: yes, y, create, lgtm, approved, etc.
+- Added adjustment workflow with re-present-and-ask-again loop
+- Fixed next steps to match acceptance criteria: "To start: ./angainor.sh --objective"
+- Added note about maxIterations default behavior
+- Files changed: skills/objective/SKILL.md (+59 lines, -14 lines)
+- **Learnings for future iterations:**
+  - Skill instructions must be explicit about when file operations are allowed
+  - List approval triggers explicitly to avoid ambiguity
+  - "adjust" workflow should re-present summary and re-ask for approval
+  - Use CRITICAL/IMPORTANT markers for behaviors that could cause problems if skipped
+---
+
+## 2026-01-23 - US-017
+Story: US-017 - Support benchmark script creation
+- Added comprehensive "Benchmark Script Creation" section to /objective skill (312 lines)
+- Created Python template for API latency benchmark (benchmark_latency.py)
+  - Measures p50/p95/p99 latency, throughput, success rate
+  - Uses only stdlib (urllib, statistics, json)
+- Created Python template for model accuracy benchmark (benchmark_accuracy.py)
+  - Calculates accuracy, precision, recall, F1-score
+  - Supports configurable JSON key names for predictions/ground_truth
+- Created Python template for test coverage benchmark (benchmark_coverage.py)
+  - Parses pytest coverage.json output
+  - Extracts line_coverage, branch_coverage, missing_lines
+- Added workflow section with 5-step process for benchmark creation
+- Updated checklist to include benchmark creation step
+- Files changed: skills/objective/SKILL.md (+312 lines)
+- **Learnings for future iterations:**
+  - Use only Python stdlib for benchmark scripts (no external dependencies)
+  - Always output JSON to stdout for metric extraction
+  - Include shebang `#!/usr/bin/env python3` for executability
+  - Handle errors gracefully: print error JSON to stderr, exit non-zero
+  - Templates should be customizable (command-line args, metric names)
+---
+
+## 2026-01-23 - US-018
+Story: US-018 - Update install-angainor.sh for objective mode
+- Added objective skill directory creation: `mkdir -p "$ANGAINOR_DIR/skills/objective"` and `mkdir -p "$GLOBAL_SKILLS_DIR/objective"`
+- Added download for objective-prompt.md to $ANGAINOR_DIR (line 176)
+- Added download for objective.json.example to $ANGAINOR_DIR (line 215)
+- Added download and install for skills/objective/SKILL.md to both local and global skills (lines 200-202)
+- Updated "Installed files" section to list new objective mode files
+- Added /objective to available skills list in success message
+- Added objective.json.example to documentation section
+- Files changed: install-angainor.sh (+26 lines, -9 lines)
+- **Learnings for future iterations:**
+  - Install script uses $ANGAINOR_DIR (.angainor subdirectory) for all downloaded files
+  - Skills are installed to both local ($ANGAINOR_DIR/skills/) and global (~/.claude/skills/)
+  - Use consistent logging pattern: log_info for operations, log_success for completions
+  - Keep existing behavior intact when adding new functionality (additive changes)
+---
+
+## 2026-01-23 - US-019
+Story: US-019 - Update CLAUDE.md with objective mode documentation
+- Added "Two Execution Modes" section (lines 11-36) with PRD vs Objective comparison table
+- Updated Commands section with --prd and --objective flag examples
+- Updated Repository Structure to include objective-prompt.md, objective.json.example, and skills/objective/
+- Added complete "objective.json Format" section (lines 224-278) with schema and field documentation
+- Added "Objective Mode Termination Conditions" section (lines 280-297) with exit codes table
+- Added /objective skill to Skills Usage table (line 191)
+- Files changed: CLAUDE.md (+114 lines, -4 lines)
+- **Learnings for future iterations:**
+  - CLAUDE.md serves as primary reference for both humans and Claude instances
+  - Use tables for comparing modes and documenting exit codes (easy scanning)
+  - Schema documentation should include both JSON example AND field-by-field explanation
+  - Link related concepts (e.g., objective.json schema references objective-prompt.md signals)
+---
+
+## 2026-01-23 - US-020
+Story: US-020 - Update README.md with objective mode usage
+- Added comprehensive "Objective Mode" section to README.md with full documentation
+- Includes "When to Use Objective Mode" comparison table (PRD vs Objective)
+- Added "Two-Phase Workflow" section with ASCII diagram showing interactive planning → autonomous execution
+- Added "Quick Start (Objective Mode)" with /objective skill and ./angainor.sh --objective invocations
+- Added "Termination Conditions" table with exit codes (SUCCESS=0, IMPOSSIBLE=2, PLATEAU=3, MAX_ITERATIONS=4)
+- Added complete example objective.json with realistic ML accuracy improvement scenario
+- Added "Key Differences from PRD Mode" comparison table
+- Added "Use Cases" section with 4 examples (performance, accuracy, coverage, quality)
+- Updated Table of Contents to include Objective Mode
+- Updated Basic Usage to show both modes with example invocations
+- Updated Skills section to list 4 skills (added /objective skill documentation)
+- Updated Git Ignore to include objective.json
+- Updated Directory Structure to include objective-prompt.md, objective.json.example, and skills/objective/
+- Updated File Reference table with new files
+- Files changed: README.md (+230 lines, -7 lines)
+- **Learnings for future iterations:**
+  - README structure follows Table of Contents order strictly
+  - Use ASCII diagrams for workflow visualization in markdown
+  - Comparison tables (PRD vs Objective) make differences clear at a glance
+  - Include multiple example invocations throughout the document (Quick Start, main section, use cases)
+---
+
+## 2026-01-23 - US-021
+Story: US-021 - Update flowchart visualization for objective mode
+- Added Objective Mode to the React Flow diagram with mode toggle UI
+- Created 14 Objective mode steps: setup (obj-1 to obj-3), loop (obj-4 to obj-9), decision (obj-10), termination (obj-success, obj-impossible, obj-plateau, obj-max)
+- Added distinct purple/coral phase colors for Objective mode (vs blue for PRD mode)
+- Added mode-specific titles and subtitles that change when switching modes
+- Added mode-specific notes (objective.json example, hypothesis note, exit codes note)
+- Added CSS styles for mode toggle buttons with distinct colors per mode
+- Fixed React ref access during render by using computeInitialNodes() helper
+- Browser verification confirmed both modes render correctly with mode toggle working
+- Files changed: flowchart/src/App.tsx (+277 lines, -46 lines), flowchart/src/App.css (+42 lines)
+- **Learnings for future iterations:**
+  - React hooks like useNodesState/useEdgesState don't accept function initializers, use computed values
+  - Avoid accessing refs during render - use helper functions that take positions as parameters
+  - For mode switching, create getModeData() helper to return mode-specific steps/positions/edges/notes
+  - Playwright requires --no-sandbox flag in containerized environments
+  - Store mode-specific data in separate constants (prdSteps, objectiveSteps, prdPositions, objectivePositions, etc.)
+---
+
+## 2026-01-23 - US-022
+Story: US-022 - Verify PRD mode still works unchanged
+- This is a verification-only story to ensure backward compatibility
+- Verified ./angainor.sh (no flags) defaults to PRD mode: MODE=prd, uses prd.json and prompt.md
+- Verified ./angainor.sh 5 runs PRD mode with 5 iterations: MODE=prd, MAX_ITERATIONS=5
+- Verified ./angainor.sh --prd 7 explicitly runs PRD mode with 7 iterations
+- Verified <promise>COMPLETE</promise> detection still works (line 1138: anchored grep pattern)
+- Verified verification blocks still enforced (lines 1147-1192: both XML and checkmark formats)
+- Verified metrics.json output still works (record_metrics function at line 193)
+- Shellcheck passes with only informational/style suggestions (SC2317 for trap handlers is expected)
+- No code changes required - all PRD mode functionality intact after Objective mode additions
+- Files changed: none (verification only)
+- **Learnings for future iterations:**
+  - Verification stories test existing functionality without requiring code changes
+  - SC2317 shellcheck warnings for trap handlers are expected (invoked indirectly via trap)
+  - metrics.json maintains full iteration history across multiple Angainor runs
 ---
