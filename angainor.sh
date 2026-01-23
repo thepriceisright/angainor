@@ -65,6 +65,19 @@ if [ ! -f "$CONFIG_FILE" ]; then
   fi
   exit 1
 fi
+
+# Validate prompt file exists
+if [ ! -f "$PROMPT_FILE" ]; then
+  if [ "$MODE" = "objective" ]; then
+    echo "Error: objective-prompt.md not found at $PROMPT_FILE"
+    echo "This file contains agent instructions for Objective mode."
+  else
+    echo "Error: prompt.md not found at $PROMPT_FILE"
+    echo "This file contains agent instructions for PRD mode."
+  fi
+  exit 1
+fi
+
 ARCHIVE_DIR="$SCRIPT_DIR/archive"
 LAST_BRANCH_FILE="$SCRIPT_DIR/.last-branch"
 TRANSCRIPT_DIR="$SCRIPT_DIR/transcripts"
@@ -406,9 +419,9 @@ for i in $(seq 1 $MAX_ITERATIONS); do
     fi
 
     if [ -n "$TIMEOUT_CMD" ]; then
-      OUTPUT=$($TIMEOUT_CMD claude --dangerously-skip-permissions --print < "$SCRIPT_DIR/prompt.md" 2>&1 | tee /dev/stderr "$TRANSCRIPT_FILE") || true
+      OUTPUT=$($TIMEOUT_CMD claude --dangerously-skip-permissions --print < "$PROMPT_FILE" 2>&1 | tee /dev/stderr "$TRANSCRIPT_FILE") || true
     else
-      OUTPUT=$(claude --dangerously-skip-permissions --print < "$SCRIPT_DIR/prompt.md" 2>&1 | tee /dev/stderr "$TRANSCRIPT_FILE") || true
+      OUTPUT=$(claude --dangerously-skip-permissions --print < "$PROMPT_FILE" 2>&1 | tee /dev/stderr "$TRANSCRIPT_FILE") || true
     fi
     CLAUDE_EXIT_CODE=$?
 
