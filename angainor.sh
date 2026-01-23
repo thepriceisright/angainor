@@ -464,6 +464,87 @@ check_objective_plateau() {
   return 0
 }
 
+# Check for metric-based plateau (automatic detection from metric history)
+# Arguments: none (reads from CONFIG_FILE)
+# Returns: 0 if plateau detected (and state updated), 1 otherwise
+check_metric_plateau() {
+  # Only run in objective mode
+  if [ "$MODE" != "objective" ]; then
+    return 1
+  fi
+
+  # Ensure objective.json exists
+  if [ ! -f "$CONFIG_FILE" ]; then
+    return 1
+  fi
+
+  # Read plateau threshold config
+  local metric min_improvement window_size
+  metric=$(jq -r '.stopping.plateauThreshold.metric // "accuracy"' "$CONFIG_FILE")
+  min_improvement=$(jq -r '.stopping.plateauThreshold.minImprovement // 0.01' "$CONFIG_FILE")
+  window_size=$(jq -r '.stopping.plateauThreshold.windowSize // 3' "$CONFIG_FILE")
+
+  # Get the metric history array length
+  local history_length
+  history_length=$(jq '.status.metricHistory | length' "$CONFIG_FILE")
+
+  # Only trigger after at least windowSize iterations exist
+  if [ "$history_length" -lt "$window_size" ]; then
+    return 1
+  fi
+
+  # Extract the last windowSize values of the tracked metric
+  # Calculate improvement: max - min across the window
+  local window_values improvement
+  window_values=$(jq -r --arg m "$metric" --argjson n "$window_size" \
+    '[.status.metricHistory[-$n:][] | .[$m] // null | select(. != null)]' "$CONFIG_FILE")
+
+  # Count valid values in window
+  local valid_count
+  valid_count=$(echo "$window_values" | jq 'length')
+
+  # If we don't have enough valid metric values in the window, can't determine plateau
+  if [ "$valid_count" -lt "$window_size" ]; then
+    return 1
+  fi
+
+  # Calculate improvement: max - min across the window
+  local max_val min_val
+  max_val=$(echo "$window_values" | jq 'max')
+  min_val=$(echo "$window_values" | jq 'min')
+
+  # Improvement is max - min (the range of values in the window)
+  improvement=$(awk -v max="$max_val" -v min="$min_val" 'BEGIN { printf "%.6f", max - min }')
+
+  # Detect plateau when improvement < minImprovement
+  local is_plateau
+  is_plateau=$(awk -v imp="$improvement" -v thresh="$min_improvement" 'BEGIN { print (imp < thresh) ? "true" : "false" }')
+
+  if [ "$is_plateau" != "true" ]; then
+    return 1
+  fi
+
+  # Plateau detected - update state and print message
+  echo ""
+  echo "═══════════════════════════════════════════════════════"
+  echo "  METRIC PLATEAU DETECTED"
+  echo "═══════════════════════════════════════════════════════"
+  echo "  No improvement in last $window_size iterations"
+  echo "  Metric: $metric"
+  echo "  Improvement: $improvement (threshold: $min_improvement)"
+
+  # Update objective.json status to 'plateau'
+  local iterations
+  iterations=$(jq -r '.status.iterations // 0' "$CONFIG_FILE")
+
+  jq '.status.state = "plateau"' "$CONFIG_FILE" > "$CONFIG_FILE.tmp" && mv "$CONFIG_FILE.tmp" "$CONFIG_FILE"
+
+  echo "  Completed after $iterations iteration(s)"
+  echo "═══════════════════════════════════════════════════════"
+
+  return 0
+}
+
 # Update objective.json with iteration metrics (Objective mode only)
 # Arguments: iteration_number metrics_json
 # Returns: 0 on success, 1 on failure
@@ -937,6 +1018,13 @@ EOF
     # Check for PLATEAU termination signal (agent-signaled diminishing returns)
     if check_objective_plateau "$OUTPUT"; then
       record_metrics "blocked" "OBJECTIVE_PLATEAU" "Agent signaled diminishing returns"
+      print_metrics_summary
+      exit 3
+    fi
+
+    # Check for metric-based plateau (automatic detection from metric history)
+    if check_metric_plateau; then
+      record_metrics "blocked" "METRIC_PLATEAU" "No metric improvement in sliding window"
       print_metrics_summary
       exit 3
     fi
