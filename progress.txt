@@ -60,3 +60,18 @@ Story: US-004 - Select config and prompt files based on mode
   - Config and prompt files share the same resolution pattern (script directory as base)
   - Shellcheck SC2317 warnings for trap handlers are expected (invoked indirectly)
 ---
+
+## 2026-01-23 - US-005
+Story: US-005 - Extract metrics from agent output
+- Created extract_metrics() function to parse <metrics>...</metrics> blocks from agent output
+- Supports JSON format: {"accuracy": 0.85, "loss": 0.42}
+- Supports key-value format: accuracy=0.85 (one per line)
+- Returns compacted JSON string for jq processing
+- Gracefully handles: missing block, malformed block, invalid JSON (warns to stderr, returns empty string)
+- Files changed: angainor.sh
+- **Learnings for future iterations:**
+  - Use `sed -n '/<tag>/,/<\/tag>/p'` to extract XML-like blocks
+  - BASH_REMATCH array captures regex groups in bash: `[[ "$line" =~ ^pattern$ ]]`
+  - Use jq --argjson for numeric values, --arg for string values
+  - SC2317 shellcheck warnings are expected for functions not yet called in main code
+---
