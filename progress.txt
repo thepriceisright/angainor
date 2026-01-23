@@ -16,3 +16,16 @@ Story: US-001 - Add --objective and --prd flags to angainor.sh
   - CONFIG_FILE is the active config, PRD_FILE kept as legacy alias for backward compatibility
   - PROMPT_FILE defined but not yet used - will be integrated in US-004
 ---
+
+## 2026-01-23 - US-002
+Story: US-002 - Create objective.json schema and example
+- Created objective.json.example with complete schema for Objective Mode
+- Schema sections: objective (description, context, constraints), verification (command, successCriteria, metricsToTrack), stopping (maxIterations, plateauThreshold, maxConsecutiveFailures), status (state, iterations, bestMetrics, metricHistory)
+- Used realistic ML model accuracy improvement example (not placeholder text)
+- Files changed: objective.json.example (new file)
+- **Learnings for future iterations:**
+  - Use jq for JSON validation: `jq '.' file.json > /dev/null && echo "valid"`
+  - Use jq boolean queries to check schema: `jq 'has("field") and (.field | has("subfield"))'`
+  - plateauThreshold nested structure: metric (string), minImprovement (float), windowSize (int)
+  - metricHistory is an array that grows with each iteration
+---

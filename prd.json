@@ -37,9 +37,9 @@
         "Typecheck passes"
       ],
       "priority": 2,
-      "passes": false,
-      "status": "pending",
-      "attempts": 0,
+      "passes": true,
+      "status": "passed",
+      "attempts": 1,
       "notes": ""
     },
     {
