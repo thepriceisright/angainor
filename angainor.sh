@@ -308,6 +308,45 @@ extract_metrics() {
   fi
 }
 
+# Check for SUCCESS termination in Objective mode
+# Arguments: output_text
+# Returns: 0 if SUCCESS found (and state updated), 1 otherwise
+check_objective_success() {
+  local output="$1"
+
+  # Only run in objective mode
+  if [ "$MODE" != "objective" ]; then
+    return 1
+  fi
+
+  # Check for <objective>SUCCESS</objective> signal
+  if ! echo "$output" | grep -qE "^[[:space:]]*<objective>SUCCESS</objective>[[:space:]]*$"; then
+    return 1
+  fi
+
+  echo ""
+  echo "═══════════════════════════════════════════════════════"
+  echo "  OBJECTIVE ACHIEVED - SUCCESS"
+  echo "═══════════════════════════════════════════════════════"
+
+  # Update objective.json status to 'success'
+  if [ -f "$CONFIG_FILE" ]; then
+    jq '.status.state = "success"' "$CONFIG_FILE" > "$CONFIG_FILE.tmp" && mv "$CONFIG_FILE.tmp" "$CONFIG_FILE"
+
+    # Print final metrics
+    local best_metrics iterations
+    best_metrics=$(jq -c '.status.bestMetrics // {}' "$CONFIG_FILE")
+    iterations=$(jq -r '.status.iterations // 0' "$CONFIG_FILE")
+
+    echo "  Completed in $iterations iteration(s)"
+    echo "  Final metrics: $best_metrics"
+  fi
+
+  echo "═══════════════════════════════════════════════════════"
+
+  return 0
+}
+
 # Update objective.json with iteration metrics (Objective mode only)
 # Arguments: iteration_number metrics_json
 # Returns: 0 on success, 1 on failure
@@ -763,6 +802,13 @@ EOF
       echo "  Extracted metrics: $EXTRACTED_METRICS"
     fi
     update_objective_metrics "$i" "$EXTRACTED_METRICS"
+
+    # Check for SUCCESS termination signal
+    if check_objective_success "$OUTPUT"; then
+      record_metrics "success" "OBJECTIVE_SUCCESS" ""
+      print_metrics_summary
+      exit 0
+    fi
   fi
 
   # Extract skill candidates from iteration output (failures don't break loop)
