@@ -11,7 +11,7 @@ Converts existing PRDs to the prd.json format that Angainor uses for autonomous 
 
 ## The Job
 
-Take a PRD (markdown file or text) and convert it to `prd.json` in your angainor directory.
+Take a PRD (markdown file or text) and convert it to `prd.json` in the **project root directory** (the same directory where `angainor.sh` is located, NOT in `.angainor/` or any subdirectory).
 
 ---
 
