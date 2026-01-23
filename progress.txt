@@ -75,3 +75,19 @@ Story: US-005 - Extract metrics from agent output
   - Use jq --argjson for numeric values, --arg for string values
   - SC2317 shellcheck warnings are expected for functions not yet called in main code
 ---
+
+## 2026-01-23 - US-006
+Story: US-006 - Update objective.json with iteration metrics
+- Created update_objective_metrics() function to persist metrics after each Objective mode iteration
+- Increments status.iterations counter with current iteration number
+- Appends metrics to status.metricHistory array with iteration number
+- Updates status.bestMetrics when primary metric (from stopping.plateauThreshold.metric) improves
+- Uses awk for floating point comparison (new > current means improvement)
+- Integrated into main loop after successful verification (Objective mode only)
+- Files changed: angainor.sh
+- **Learnings for future iterations:**
+  - Use awk for floating point comparison: `awk -v new="$new" -v cur="$cur" 'BEGIN { print (new > cur) ? "true" : "false" }'`
+  - jq --argjson passes JSON objects/arrays directly; use for metrics_json
+  - Check for empty string AND empty object "{}" when handling missing metrics
+  - Pattern: write to .tmp file then mv to avoid corrupting original on failure
+---
