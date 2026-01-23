@@ -1,13 +1,70 @@
 #!/bin/bash
 # Angainor Wiggum - Long-running AI agent loop
-# Usage: ./angainor.sh [max_iterations]
+# Usage: ./angainor.sh [max_iterations]              # PRD mode (default)
+#        ./angainor.sh --prd [max_iterations]        # PRD mode (explicit)
+#        ./angainor.sh --objective [max_iterations]  # Objective mode
 
 set -e
 
-MAX_ITERATIONS=${1:-10}
+# Parse command-line arguments
+MODE="prd"  # Default mode
+MAX_ITERATIONS=""
+
+while [[ $# -gt 0 ]]; do
+  case $1 in
+    --objective)
+      MODE="objective"
+      shift
+      ;;
+    --prd)
+      MODE="prd"
+      shift
+      ;;
+    *)
+      # Assume it's the max_iterations number
+      if [[ $1 =~ ^[0-9]+$ ]]; then
+        MAX_ITERATIONS="$1"
+      else
+        echo "Error: Unknown argument '$1'"
+        echo "Usage: ./angainor.sh [--prd|--objective] [max_iterations]"
+        exit 1
+      fi
+      shift
+      ;;
+  esac
+done
+
+# Set default max iterations
+MAX_ITERATIONS=${MAX_ITERATIONS:-10}
+
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# Set config and prompt files based on mode
+if [ "$MODE" = "objective" ]; then
+  CONFIG_FILE="$SCRIPT_DIR/objective.json"
+  PROMPT_FILE="$SCRIPT_DIR/objective-prompt.md"
+  MODE_DISPLAY="OBJECTIVE"
+else
+  CONFIG_FILE="$SCRIPT_DIR/prd.json"
+  PROMPT_FILE="$SCRIPT_DIR/prompt.md"
+  MODE_DISPLAY="PRD"
+fi
+
+# Legacy aliases for backward compatibility (PRD mode uses PRD_FILE variable)
 PRD_FILE="$SCRIPT_DIR/prd.json"
 PROGRESS_FILE="$SCRIPT_DIR/progress.txt"
+
+# Validate config file exists
+if [ ! -f "$CONFIG_FILE" ]; then
+  if [ "$MODE" = "objective" ]; then
+    echo "Error: objective.json not found at $CONFIG_FILE"
+    echo "Create an objective.json file or use --prd flag for PRD mode."
+  else
+    echo "Error: prd.json not found at $CONFIG_FILE"
+    echo "Create a prd.json file or use --objective flag for Objective mode."
+  fi
+  exit 1
+fi
 ARCHIVE_DIR="$SCRIPT_DIR/archive"
 LAST_BRANCH_FILE="$SCRIPT_DIR/.last-branch"
 TRANSCRIPT_DIR="$SCRIPT_DIR/transcripts"
@@ -314,7 +371,7 @@ fi
 # Configure Angainor profile (disable interfering plugins) before main loop
 configure_angainor_profile
 
-echo "Starting Angainor - Max iterations: $MAX_ITERATIONS"
+echo "Starting Angainor in $MODE_DISPLAY mode - Max iterations: $MAX_ITERATIONS"
 
 for i in $(seq 1 $MAX_ITERATIONS); do
   echo ""
