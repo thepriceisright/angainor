@@ -131,7 +131,9 @@
       "Bash(bash -n:*)",
       "Bash(/workspace/repos/claude-and-ralph/angainor.sh:*)",
       "Bash(chmod:*)",
-      "Bash(./angainor.sh:*)"
+      "Bash(./angainor.sh:*)",
+      "Bash(claude --print:*)",
+      "Bash(claude --dangerously-skip-permissions --print)"
     ]
   }
 }

@@ -1102,8 +1102,21 @@ if [ "$VERBOSE" = true ]; then
     PROMPT_SIZE=$(wc -c < "$PROMPT_FILE" | tr -d ' ')
     PROMPT_LINES=$(wc -l < "$PROMPT_FILE" | tr -d ' ')
     echo "  ✓ Prompt file: $PROMPT_FILE ($PROMPT_SIZE bytes, $PROMPT_LINES lines)"
+    # Warn if prompt file is very large (>50KB can cause issues)
+    if [ "$PROMPT_SIZE" -gt 50000 ]; then
+      echo "    ⚠ Warning: Prompt file is large (>50KB) - may cause slowness"
+    fi
   else
     echo "  ✗ Prompt file missing: $PROMPT_FILE"
+  fi
+
+  # Quick Claude CLI test
+  echo "  Testing Claude CLI..."
+  QUICK_TEST=$(echo "say OK" | timeout 30 claude --print 2>&1 | head -1 || echo "FAILED")
+  if [ -n "$QUICK_TEST" ] && [ "$QUICK_TEST" != "FAILED" ]; then
+    echo "  ✓ Claude CLI: Responsive"
+  else
+    echo "  ✗ Claude CLI: Not responding (check authentication with 'claude config')"
   fi
 
   # Check timeout command
@@ -1168,15 +1181,46 @@ for i in $(seq 1 $MAX_ITERATIONS); do
 
     # Capture stderr separately for debugging
     STDERR_FILE=$(mktemp)
+    STDOUT_FILE=$(mktemp)
 
-    if [ -n "$TIMEOUT_CMD" ]; then
-      OUTPUT=$($TIMEOUT_CMD claude --dangerously-skip-permissions --print < "$PROMPT_FILE" 2> >(tee "$STDERR_FILE" >&2) | tee "$TRANSCRIPT_FILE") || true
-    else
-      OUTPUT=$(claude --dangerously-skip-permissions --print < "$PROMPT_FILE" 2> >(tee "$STDERR_FILE" >&2) | tee "$TRANSCRIPT_FILE") || true
+    # Debug: Test if Claude CLI is responsive with a simple command first
+    if [ "$VERBOSE" = true ] && [ "$retry" -eq 1 ]; then
+      log_verbose "Pre-flight check: Testing Claude CLI responsiveness..."
+      PREFLIGHT_OUTPUT=$(echo "respond with OK" | timeout 30 claude --print 2>&1 || echo "PREFLIGHT_FAILED")
+      if [[ "$PREFLIGHT_OUTPUT" == *"PREFLIGHT_FAILED"* ]] || [ -z "$PREFLIGHT_OUTPUT" ]; then
+        log_error "Pre-flight check FAILED - Claude CLI may not be responding"
+        echo "  ⚠ Pre-flight check: Claude CLI not responding to simple prompt"
+      else
+        log_verbose "Pre-flight check: OK (Claude CLI responsive)"
+      fi
     fi
-    CLAUDE_EXIT_CODE=$?
+
+    # Run Claude and capture output to files for reliable capture
+    # Using files instead of process substitution for better reliability
+    if [ -n "$TIMEOUT_CMD" ]; then
+      $TIMEOUT_CMD claude --dangerously-skip-permissions --print < "$PROMPT_FILE" > "$STDOUT_FILE" 2> "$STDERR_FILE" || true
+      CLAUDE_EXIT_CODE=$?
+    else
+      claude --dangerously-skip-permissions --print < "$PROMPT_FILE" > "$STDOUT_FILE" 2> "$STDERR_FILE" || true
+      CLAUDE_EXIT_CODE=$?
+    fi
+
+    # Read captured output from files
+    OUTPUT=$(cat "$STDOUT_FILE" 2>/dev/null || echo "")
     STDERR_CONTENT=$(cat "$STDERR_FILE" 2>/dev/null || echo "")
-    rm -f "$STDERR_FILE"
+
+    # Also write to transcript file
+    cat "$STDOUT_FILE" > "$TRANSCRIPT_FILE" 2>/dev/null || true
+
+    # Debug: Show file sizes
+    if [ -n "$DEBUG_LOG" ]; then
+      STDOUT_SIZE=$(wc -c < "$STDOUT_FILE" 2>/dev/null | tr -d ' ' || echo "0")
+      STDERR_SIZE=$(wc -c < "$STDERR_FILE" 2>/dev/null | tr -d ' ' || echo "0")
+      log_debug "STDOUT file size: $STDOUT_SIZE bytes"
+      log_debug "STDERR file size: $STDERR_SIZE bytes"
+    fi
+
+    rm -f "$STDERR_FILE" "$STDOUT_FILE"
 
     # Verbose: Log response details
     log_verbose "Claude exit code: $CLAUDE_EXIT_CODE"
