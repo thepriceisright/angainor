@@ -1110,13 +1110,13 @@ if [ "$VERBOSE" = true ]; then
     echo "  ✗ Prompt file missing: $PROMPT_FILE"
   fi
 
-  # Quick Claude CLI test
+  # Quick Claude CLI test (using pipe, not redirect - redirect has known issues)
   echo "  Testing Claude CLI..."
   QUICK_TEST=$(echo "say OK" | timeout 30 claude --print 2>&1 | head -1 || echo "FAILED")
   if [ -n "$QUICK_TEST" ] && [ "$QUICK_TEST" != "FAILED" ]; then
-    echo "  ✓ Claude CLI: Responsive"
+    echo "  ✓ Claude CLI: Responsive (via pipe)"
   else
-    echo "  ✗ Claude CLI: Not responding (check authentication with 'claude config')"
+    echo "  ✗ Claude CLI: Not responding (check authentication with 'claude doctor')"
   fi
 
   # Check timeout command
@@ -1177,7 +1177,7 @@ for i in $(seq 1 $MAX_ITERATIONS); do
     fi
 
     log_verbose "Timeout command: ${TIMEOUT_CMD:-'(none - no timeout)'}"
-    log_verbose "Claude command: claude --dangerously-skip-permissions --print < $PROMPT_FILE"
+    log_verbose "Claude command: cat $PROMPT_FILE | claude --dangerously-skip-permissions --print"
 
     # Capture stderr separately for debugging
     STDERR_FILE=$(mktemp)
@@ -1196,12 +1196,14 @@ for i in $(seq 1 $MAX_ITERATIONS); do
     fi
 
     # Run Claude and capture output to files for reliable capture
-    # Using files instead of process substitution for better reliability
+    # IMPORTANT: Use 'cat | claude' instead of 'claude < file' because
+    # Claude CLI has a bug where file redirect hangs with --dangerously-skip-permissions --print
+    # but piping works correctly. See: https://github.com/anthropics/claude-code/issues/XXX
     if [ -n "$TIMEOUT_CMD" ]; then
-      $TIMEOUT_CMD claude --dangerously-skip-permissions --print < "$PROMPT_FILE" > "$STDOUT_FILE" 2> "$STDERR_FILE" || true
+      cat "$PROMPT_FILE" | $TIMEOUT_CMD claude --dangerously-skip-permissions --print > "$STDOUT_FILE" 2> "$STDERR_FILE" || true
       CLAUDE_EXIT_CODE=$?
     else
-      claude --dangerously-skip-permissions --print < "$PROMPT_FILE" > "$STDOUT_FILE" 2> "$STDERR_FILE" || true
+      cat "$PROMPT_FILE" | claude --dangerously-skip-permissions --print > "$STDOUT_FILE" 2> "$STDERR_FILE" || true
       CLAUDE_EXIT_CODE=$?
     fi
 
