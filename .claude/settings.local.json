@@ -1,0 +1,34 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(wc:*)",
+      "Bash(npm ls:*)",
+      "Skill(prd)",
+      "Skill(ralph)",
+      "Skill(superpowers:systematic-debugging)",
+      "Bash(ls:*)",
+      "Bash(cat:*)",
+      "Bash(echo:*)",
+      "Skill(code-review:code-review)",
+      "Bash(npm run typecheck:*)",
+      "Skill(superpowers:brainstorming)",
+      "Bash(grep:*)",
+      "Bash(claude plugin:*)",
+      "WebFetch(domain:github.com)",
+      "WebFetch(domain:raw.githubusercontent.com)",
+      "WebFetch(domain:api.github.com)",
+      "Skill(superpowers:writing-skills)",
+      "Bash(shellcheck:*)",
+      "Bash(git add:*)",
+      "Bash(git commit -m \"$\\(cat <<''EOF''\nfix: Make verification requirement harder to skip\n\n- Add ⛔ STOP markers in task list before step 10\n- Add warning after \"Before Running Git Commit\" section\n- Add prominent ⛔⛔⛔ STOP header for verification section\n- Clarify that agents are NOT DONE after committing\n\nAgents were completing work and committing but skipping\nthe verification block output, causing iteration rejection.\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>\nEOF\n\\)\")",
+      "Bash(git mv:*)",
+      "Bash(npx playwright:*)",
+      "Bash(node)",
+      "mcp__plugin_playwright_playwright__browser_navigate",
+      "Bash(find:*)",
+      "WebFetch(domain:www.npmjs.com)",
+      "WebSearch",
+      "Skill(angainor)"
+    ]
+  }
+}
