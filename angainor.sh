@@ -203,6 +203,7 @@ restore_plugins() {
 # Track last response for error reporting
 LAST_CLAUDE_OUTPUT=""
 LAST_ITERATION=0
+CLAUDE_PID=""
 
 # Trap handler for cleanup on exit (normal, error, or interrupt)
 cleanup_on_exit() {
@@ -224,10 +225,33 @@ cleanup_on_exit() {
   exit $exit_code
 }
 
+# Interrupt handler - kill any running Claude process and clean up
+interrupt_handler() {
+  echo ""
+  echo "  ⚠ Interrupted by user (Ctrl+C)"
+
+  # Kill any running Claude process and its children
+  if [ -n "$CLAUDE_PID" ] && kill -0 "$CLAUDE_PID" 2>/dev/null; then
+    echo "  Terminating Claude process (PID: $CLAUDE_PID)..."
+    # Kill the entire process group
+    kill -TERM -"$CLAUDE_PID" 2>/dev/null || kill -TERM "$CLAUDE_PID" 2>/dev/null || true
+    sleep 1
+    # Force kill if still running
+    kill -KILL -"$CLAUDE_PID" 2>/dev/null || kill -KILL "$CLAUDE_PID" 2>/dev/null || true
+  fi
+
+  # Also kill any orphaned claude processes from this script
+  pkill -P $$ 2>/dev/null || true
+
+  restore_plugins
+  echo "  Angainor terminated."
+  exit 130  # Standard exit code for Ctrl+C
+}
+
 # Register cleanup traps - EXIT covers normal exit and set -e failures
-# SIGINT covers Ctrl+C interrupts
+# SIGINT/SIGTERM cover Ctrl+C and kill commands
 trap cleanup_on_exit EXIT
-trap 'trap - EXIT; cleanup_on_exit' INT
+trap interrupt_handler INT TERM
 
 # Print metrics summary on loop completion
 print_metrics_summary() {
@@ -1220,7 +1244,7 @@ for i in $(seq 1 $MAX_ITERATIONS); do
     fi
 
     log_verbose "Timeout command: ${TIMEOUT_CMD:-'(none - no timeout)'}"
-    log_verbose "Claude command: cat $PROMPT_FILE | claude --dangerously-skip-permissions --print"
+    log_verbose "Claude command: claude --dangerously-skip-permissions --print < $PROMPT_FILE"
 
     # Capture stderr separately for debugging
     STDERR_FILE=$(mktemp)
@@ -1239,16 +1263,19 @@ for i in $(seq 1 $MAX_ITERATIONS); do
     fi
 
     # Run Claude and capture output to files for reliable capture
-    # IMPORTANT: Use 'cat | claude' instead of 'claude < file' because
-    # Claude CLI has a bug where file redirect hangs with --dangerously-skip-permissions --print
-    # but piping works correctly. See: https://github.com/anthropics/claude-code/issues/XXX
+    # Run in background to capture PID for interrupt handling
     if [ -n "$TIMEOUT_CMD" ]; then
-      cat "$PROMPT_FILE" | $TIMEOUT_CMD claude --dangerously-skip-permissions --print > "$STDOUT_FILE" 2> "$STDERR_FILE" || true
-      CLAUDE_EXIT_CODE=$?
+      $TIMEOUT_CMD claude --dangerously-skip-permissions --print < "$PROMPT_FILE" > "$STDOUT_FILE" 2> "$STDERR_FILE" &
+      CLAUDE_PID=$!
     else
-      cat "$PROMPT_FILE" | claude --dangerously-skip-permissions --print > "$STDOUT_FILE" 2> "$STDERR_FILE" || true
-      CLAUDE_EXIT_CODE=$?
+      claude --dangerously-skip-permissions --print < "$PROMPT_FILE" > "$STDOUT_FILE" 2> "$STDERR_FILE" &
+      CLAUDE_PID=$!
     fi
+
+    # Wait for Claude to complete (this allows interrupt signals to be caught)
+    wait "$CLAUDE_PID" 2>/dev/null || true
+    CLAUDE_EXIT_CODE=$?
+    CLAUDE_PID=""  # Clear PID after completion
 
     # Read captured output from files
     OUTPUT=$(cat "$STDOUT_FILE" 2>/dev/null || echo "")
