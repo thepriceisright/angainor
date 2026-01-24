@@ -138,10 +138,21 @@ Consolidate reusable patterns at the TOP of progress.txt in a `## Codebase Patte
 ### Completion Signal
 When all stories have `passes: true`, output: `<promise>COMPLETE</promise>`
 
-### Verification Enforcement
+### Verification Enforcement (PRD Mode)
 angainor.sh enforces that each iteration includes `<verification>` blocks before accepting story completion. If blocks are missing or contain `NOT_SATISFIED`, the iteration fails and doesn't count toward completion.
 
 Flexible verification: angainor.sh accepts either `<verification>` XML blocks OR ✅ checkmarks as valid verification evidence.
+
+### Iteration Boundaries (Objective Mode)
+Each objective iteration MUST end with `<iteration>COMPLETE</iteration>` (or a termination signal). This ensures:
+- ONE experiment per iteration (prevents runaway sessions)
+- Clean handoff to next fresh Claude instance
+- Proper metrics extraction before iteration ends
+
+**Required signals:**
+- `<metrics>{...}</metrics>` - Measurements from this experiment
+- `<iteration>COMPLETE</iteration>` - Normal iteration end
+- `<objective>SUCCESS|IMPOSSIBLE|PLATEAU</objective>` - Terminal states
 
 ### Angainor Profile
 angainor.sh configures a minimal plugin environment for autonomous runs:

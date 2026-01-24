@@ -1515,8 +1515,25 @@ EOF
   # Record successful iteration metrics
   record_metrics "success" "$STORY_ID" ""
 
-  # For Objective mode: extract metrics and update objective.json
+  # For Objective mode: check for iteration boundary signal and extract metrics
   if [ "$MODE" = "objective" ]; then
+    # Check for iteration completion signal (required to properly bound iterations)
+    # Accept: <iteration>COMPLETE</iteration> OR any termination signal (SUCCESS, IMPOSSIBLE, PLATEAU)
+    HAS_ITERATION_COMPLETE=$(echo "$OUTPUT" | grep -cE "<iteration>COMPLETE</iteration>|<objective>(SUCCESS|IMPOSSIBLE|PLATEAU)</objective>") || HAS_ITERATION_COMPLETE=0
+
+    if [ "$HAS_ITERATION_COMPLETE" -eq 0 ]; then
+      echo ""
+      echo "  ⚠ ITERATION BOUNDARY MISSING"
+      echo "  Agent did not output <iteration>COMPLETE</iteration> or termination signal."
+      echo "  This iteration may not have properly completed its experiment cycle."
+      log_verbose "Missing iteration boundary signal"
+
+      # Don't fail the iteration, but warn - the agent might have been interrupted
+      # or might have output metrics without the completion signal
+    else
+      log_verbose "Iteration boundary signal found"
+    fi
+
     log_verbose "Processing objective mode metrics..."
     EXTRACTED_METRICS=$(extract_metrics "$OUTPUT")
     if [ -n "$EXTRACTED_METRICS" ]; then
