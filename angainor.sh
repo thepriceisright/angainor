@@ -14,6 +14,7 @@ MODE="prd"  # Default mode
 MAX_ITERATIONS=""
 VERBOSE=false
 DEBUG_LOG=""
+CLAUDE_TIMEOUT=""  # Will be set to default later if not specified
 
 while [[ $# -gt 0 ]]; do
   case $1 in
@@ -41,12 +42,24 @@ while [[ $# -gt 0 ]]; do
       DEBUG_LOG="${1#*=}"
       shift
       ;;
+    --timeout=*)
+      # Set iteration timeout in seconds (default: 1800 for objective, 600 for PRD)
+      CLAUDE_TIMEOUT="${1#*=}"
+      shift
+      ;;
+    --no-timeout)
+      # Disable timeout entirely
+      CLAUDE_TIMEOUT="0"
+      shift
+      ;;
     --help|-h)
       echo "Usage: ./angainor.sh [OPTIONS] [max_iterations]"
       echo ""
       echo "Options:"
       echo "  --prd             Run in PRD mode (default)"
       echo "  --objective       Run in Objective mode"
+      echo "  --timeout=SECS    Set iteration timeout (default: 1800s objective, 600s PRD)"
+      echo "  --no-timeout      Disable iteration timeout entirely"
       echo "  --verbose, -v     Enable verbose output for debugging"
       echo "  --debug           Enable debug logging to angainor-debug.log"
       echo "  --debug=FILE      Enable debug logging to specific file"
@@ -1062,9 +1075,23 @@ fi
 # Configure Angainor profile (disable interfering plugins) before main loop
 configure_angainor_profile
 
+# Compute effective timeout for display
+if [ -z "$CLAUDE_TIMEOUT" ]; then
+  if [ "$MODE" = "objective" ]; then
+    EFFECTIVE_TIMEOUT="1800s (30 min, objective default)"
+  else
+    EFFECTIVE_TIMEOUT="600s (10 min, PRD default)"
+  fi
+elif [ "$CLAUDE_TIMEOUT" = "0" ]; then
+  EFFECTIVE_TIMEOUT="disabled"
+else
+  EFFECTIVE_TIMEOUT="${CLAUDE_TIMEOUT}s"
+fi
+
 echo "Starting Angainor in $MODE_DISPLAY mode - Max iterations: $MAX_ITERATIONS"
 if [ "$VERBOSE" = true ]; then
   echo "Verbose mode: ENABLED"
+  echo "Iteration timeout: $EFFECTIVE_TIMEOUT"
   if [ -n "$DEBUG_LOG" ]; then
     echo "Debug log: $DEBUG_LOG"
   fi
@@ -1147,8 +1174,21 @@ for i in $(seq 1 $MAX_ITERATIONS); do
   # Run Claude with retry logic for transient API errors
   MAX_RETRIES=3
   RETRY_DELAY=5
-  CLAUDE_TIMEOUT=600  # 10 minutes per iteration
   CLAUDE_SUCCESS=false
+
+  # Set timeout: use CLI value, or default based on mode
+  # Objective mode gets longer default (30 min) since it often runs benchmarks
+  if [ -z "$CLAUDE_TIMEOUT" ]; then
+    if [ "$MODE" = "objective" ]; then
+      ITERATION_TIMEOUT=1800  # 30 minutes for objective mode
+    else
+      ITERATION_TIMEOUT=600   # 10 minutes for PRD mode
+    fi
+  elif [ "$CLAUDE_TIMEOUT" = "0" ]; then
+    ITERATION_TIMEOUT=0  # No timeout
+  else
+    ITERATION_TIMEOUT="$CLAUDE_TIMEOUT"
+  fi
 
   # Verbose: Log iteration details
   log_verbose "Starting iteration $i"
@@ -1168,10 +1208,13 @@ for i in $(seq 1 $MAX_ITERATIONS); do
 
     # Run Claude with timeout protection to prevent hangs on crashed processes
     # Use gtimeout on macOS (from coreutils), timeout on Linux, or no timeout as fallback
-    if command -v gtimeout &> /dev/null; then
-      TIMEOUT_CMD="gtimeout --signal=KILL $CLAUDE_TIMEOUT"
+    # ITERATION_TIMEOUT=0 means no timeout
+    if [ "$ITERATION_TIMEOUT" = "0" ]; then
+      TIMEOUT_CMD=""  # No timeout requested
+    elif command -v gtimeout &> /dev/null; then
+      TIMEOUT_CMD="gtimeout --signal=KILL $ITERATION_TIMEOUT"
     elif command -v timeout &> /dev/null; then
-      TIMEOUT_CMD="timeout --signal=KILL $CLAUDE_TIMEOUT"
+      TIMEOUT_CMD="timeout --signal=KILL $ITERATION_TIMEOUT"
     else
       TIMEOUT_CMD=""  # No timeout available, run without
     fi
@@ -1247,8 +1290,8 @@ for i in $(seq 1 $MAX_ITERATIONS); do
     # Check for timeout (exit code 137 = killed by SIGKILL, 124 = timeout exit code)
     if [ -n "$TIMEOUT_CMD" ] && { [ "$CLAUDE_EXIT_CODE" -eq 137 ] || [ "$CLAUDE_EXIT_CODE" -eq 124 ]; }; then
       echo ""
-      echo "  ⚠ Claude process timed out after ${CLAUDE_TIMEOUT}s (attempt $retry/$MAX_RETRIES)"
-      log_verbose "TIMEOUT: Exit code $CLAUDE_EXIT_CODE after ${CLAUDE_TIMEOUT}s"
+      echo "  ⚠ Claude process timed out after ${ITERATION_TIMEOUT}s (attempt $retry/$MAX_RETRIES)"
+      log_verbose "TIMEOUT: Exit code $CLAUDE_EXIT_CODE after ${ITERATION_TIMEOUT}s"
       log_verbose "TIMEOUT: stderr=$STDERR_CONTENT"
       if [ "$retry" -lt "$MAX_RETRIES" ]; then
         echo "  Retrying in ${RETRY_DELAY}s..."
