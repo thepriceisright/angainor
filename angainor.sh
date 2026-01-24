@@ -6,9 +6,14 @@
 
 set -e
 
+# Get script directory early (needed for --debug default path)
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
 # Parse command-line arguments
 MODE="prd"  # Default mode
 MAX_ITERATIONS=""
+VERBOSE=false
+DEBUG_LOG=""
 
 while [[ $# -gt 0 ]]; do
   case $1 in
@@ -20,13 +25,45 @@ while [[ $# -gt 0 ]]; do
       MODE="prd"
       shift
       ;;
+    --verbose|-v)
+      VERBOSE=true
+      shift
+      ;;
+    --debug)
+      # Enable debug logging to a file (implies verbose)
+      VERBOSE=true
+      DEBUG_LOG="$SCRIPT_DIR/angainor-debug.log"
+      shift
+      ;;
+    --debug=*)
+      # Enable debug logging to a specific file
+      VERBOSE=true
+      DEBUG_LOG="${1#*=}"
+      shift
+      ;;
+    --help|-h)
+      echo "Usage: ./angainor.sh [OPTIONS] [max_iterations]"
+      echo ""
+      echo "Options:"
+      echo "  --prd             Run in PRD mode (default)"
+      echo "  --objective       Run in Objective mode"
+      echo "  --verbose, -v     Enable verbose output for debugging"
+      echo "  --debug           Enable debug logging to angainor-debug.log"
+      echo "  --debug=FILE      Enable debug logging to specific file"
+      echo "  --help, -h        Show this help message"
+      echo ""
+      echo "Arguments:"
+      echo "  max_iterations    Maximum iterations to run (default: 10)"
+      exit 0
+      ;;
     *)
       # Assume it's the max_iterations number
       if [[ $1 =~ ^[0-9]+$ ]]; then
         MAX_ITERATIONS="$1"
       else
         echo "Error: Unknown argument '$1'"
-        echo "Usage: ./angainor.sh [--prd|--objective] [max_iterations]"
+        echo "Usage: ./angainor.sh [--prd|--objective] [--verbose] [max_iterations]"
+        echo "Use --help for more options."
         exit 1
       fi
       shift
@@ -37,7 +74,39 @@ done
 # Set default max iterations
 MAX_ITERATIONS=${MAX_ITERATIONS:-10}
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# Logging functions
+log_verbose() {
+  if [ "$VERBOSE" = true ]; then
+    echo "[VERBOSE] $*"
+  fi
+  if [ -n "$DEBUG_LOG" ]; then
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] [VERBOSE] $*" >> "$DEBUG_LOG"
+  fi
+}
+
+log_debug() {
+  if [ -n "$DEBUG_LOG" ]; then
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] [DEBUG] $*" >> "$DEBUG_LOG"
+  fi
+}
+
+log_error() {
+  echo "[ERROR] $*" >&2
+  if [ -n "$DEBUG_LOG" ]; then
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] [ERROR] $*" >> "$DEBUG_LOG"
+  fi
+}
+
+# Initialize debug log if enabled
+if [ -n "$DEBUG_LOG" ]; then
+  echo "" >> "$DEBUG_LOG"
+  echo "═══════════════════════════════════════════════════════" >> "$DEBUG_LOG"
+  echo "Angainor Debug Session Started: $(date)" >> "$DEBUG_LOG"
+  echo "Mode: $MODE" >> "$DEBUG_LOG"
+  echo "Max Iterations: $MAX_ITERATIONS" >> "$DEBUG_LOG"
+  echo "Working Directory: $(pwd)" >> "$DEBUG_LOG"
+  echo "═══════════════════════════════════════════════════════" >> "$DEBUG_LOG"
+fi
 
 # Set config and prompt files based on mode
 if [ "$MODE" = "objective" ]; then
@@ -994,6 +1063,60 @@ fi
 configure_angainor_profile
 
 echo "Starting Angainor in $MODE_DISPLAY mode - Max iterations: $MAX_ITERATIONS"
+if [ "$VERBOSE" = true ]; then
+  echo "Verbose mode: ENABLED"
+  if [ -n "$DEBUG_LOG" ]; then
+    echo "Debug log: $DEBUG_LOG"
+  fi
+  log_verbose "Config file: $CONFIG_FILE"
+  log_verbose "Prompt file: $PROMPT_FILE"
+  log_verbose "Transcript dir: $TRANSCRIPT_DIR"
+
+  # Diagnostic checks
+  echo ""
+  echo "Diagnostic checks:"
+
+  # Check Claude CLI
+  if command -v claude &> /dev/null; then
+    CLAUDE_VERSION=$(claude --version 2>/dev/null | head -1 || echo "unknown")
+    echo "  ✓ Claude CLI found: $CLAUDE_VERSION"
+  else
+    echo "  ✗ Claude CLI not found in PATH"
+    log_error "Claude CLI not found"
+  fi
+
+  # Check config file
+  if [ -f "$CONFIG_FILE" ]; then
+    CONFIG_SIZE=$(wc -c < "$CONFIG_FILE" | tr -d ' ')
+    echo "  ✓ Config file: $CONFIG_FILE ($CONFIG_SIZE bytes)"
+    if ! jq '.' "$CONFIG_FILE" > /dev/null 2>&1; then
+      echo "    ⚠ Warning: Config file is not valid JSON"
+      log_error "Config file is not valid JSON"
+    fi
+  else
+    echo "  ✗ Config file missing: $CONFIG_FILE"
+  fi
+
+  # Check prompt file
+  if [ -f "$PROMPT_FILE" ]; then
+    PROMPT_SIZE=$(wc -c < "$PROMPT_FILE" | tr -d ' ')
+    PROMPT_LINES=$(wc -l < "$PROMPT_FILE" | tr -d ' ')
+    echo "  ✓ Prompt file: $PROMPT_FILE ($PROMPT_SIZE bytes, $PROMPT_LINES lines)"
+  else
+    echo "  ✗ Prompt file missing: $PROMPT_FILE"
+  fi
+
+  # Check timeout command
+  if command -v gtimeout &> /dev/null; then
+    echo "  ✓ Timeout: gtimeout (macOS coreutils)"
+  elif command -v timeout &> /dev/null; then
+    echo "  ✓ Timeout: timeout (Linux)"
+  else
+    echo "  ⚠ Timeout: not available (no timeout protection)"
+  fi
+
+  echo ""
+fi
 
 for i in $(seq 1 $MAX_ITERATIONS); do
   echo ""
@@ -1014,8 +1137,21 @@ for i in $(seq 1 $MAX_ITERATIONS); do
   CLAUDE_TIMEOUT=600  # 10 minutes per iteration
   CLAUDE_SUCCESS=false
 
+  # Verbose: Log iteration details
+  log_verbose "Starting iteration $i"
+  log_verbose "Transcript file: $TRANSCRIPT_FILE"
+
+  # Debug: Log prompt file info
+  if [ -n "$DEBUG_LOG" ]; then
+    log_debug "Prompt file size: $(wc -c < "$PROMPT_FILE" | tr -d ' ') bytes"
+    log_debug "Prompt file lines: $(wc -l < "$PROMPT_FILE" | tr -d ' ') lines"
+    log_debug "Config file ($CONFIG_FILE):"
+    head -20 "$CONFIG_FILE" >> "$DEBUG_LOG" 2>&1 || echo "  (could not read)" >> "$DEBUG_LOG"
+  fi
+
   for retry in $(seq 1 $MAX_RETRIES); do
     echo "  Calling Claude API (attempt $retry/$MAX_RETRIES)..."
+    log_verbose "API call attempt $retry/$MAX_RETRIES at $(date '+%H:%M:%S')"
 
     # Run Claude with timeout protection to prevent hangs on crashed processes
     # Use gtimeout on macOS (from coreutils), timeout on Linux, or no timeout as fallback
@@ -1027,17 +1163,47 @@ for i in $(seq 1 $MAX_ITERATIONS); do
       TIMEOUT_CMD=""  # No timeout available, run without
     fi
 
+    log_verbose "Timeout command: ${TIMEOUT_CMD:-'(none - no timeout)'}"
+    log_verbose "Claude command: claude --dangerously-skip-permissions --print < $PROMPT_FILE"
+
+    # Capture stderr separately for debugging
+    STDERR_FILE=$(mktemp)
+
     if [ -n "$TIMEOUT_CMD" ]; then
-      OUTPUT=$($TIMEOUT_CMD claude --dangerously-skip-permissions --print < "$PROMPT_FILE" 2>&1 | tee /dev/stderr "$TRANSCRIPT_FILE") || true
+      OUTPUT=$($TIMEOUT_CMD claude --dangerously-skip-permissions --print < "$PROMPT_FILE" 2> >(tee "$STDERR_FILE" >&2) | tee "$TRANSCRIPT_FILE") || true
     else
-      OUTPUT=$(claude --dangerously-skip-permissions --print < "$PROMPT_FILE" 2>&1 | tee /dev/stderr "$TRANSCRIPT_FILE") || true
+      OUTPUT=$(claude --dangerously-skip-permissions --print < "$PROMPT_FILE" 2> >(tee "$STDERR_FILE" >&2) | tee "$TRANSCRIPT_FILE") || true
     fi
     CLAUDE_EXIT_CODE=$?
+    STDERR_CONTENT=$(cat "$STDERR_FILE" 2>/dev/null || echo "")
+    rm -f "$STDERR_FILE"
+
+    # Verbose: Log response details
+    log_verbose "Claude exit code: $CLAUDE_EXIT_CODE"
+    log_verbose "Response length: ${#OUTPUT} characters"
+    log_verbose "Stderr length: ${#STDERR_CONTENT} characters"
+
+    if [ -n "$DEBUG_LOG" ]; then
+      log_debug "--- STDERR START ---"
+      echo "$STDERR_CONTENT" | head -50 >> "$DEBUG_LOG"
+      log_debug "--- STDERR END ---"
+      if [ ${#OUTPUT} -lt 500 ]; then
+        log_debug "--- STDOUT (full, < 500 chars) ---"
+        echo "$OUTPUT" >> "$DEBUG_LOG"
+        log_debug "--- STDOUT END ---"
+      else
+        log_debug "--- STDOUT (first 500 chars) ---"
+        echo "${OUTPUT:0:500}" >> "$DEBUG_LOG"
+        log_debug "--- STDOUT END ---"
+      fi
+    fi
 
     # Check for timeout (exit code 137 = killed by SIGKILL, 124 = timeout exit code)
     if [ -n "$TIMEOUT_CMD" ] && { [ "$CLAUDE_EXIT_CODE" -eq 137 ] || [ "$CLAUDE_EXIT_CODE" -eq 124 ]; }; then
       echo ""
       echo "  ⚠ Claude process timed out after ${CLAUDE_TIMEOUT}s (attempt $retry/$MAX_RETRIES)"
+      log_verbose "TIMEOUT: Exit code $CLAUDE_EXIT_CODE after ${CLAUDE_TIMEOUT}s"
+      log_verbose "TIMEOUT: stderr=$STDERR_CONTENT"
       if [ "$retry" -lt "$MAX_RETRIES" ]; then
         echo "  Retrying in ${RETRY_DELAY}s..."
         sleep "$RETRY_DELAY"
@@ -1045,6 +1211,7 @@ for i in $(seq 1 $MAX_ITERATIONS); do
         continue
       else
         echo "  ✗ Max retries exceeded due to timeouts."
+        log_error "Max retries exceeded due to timeouts"
         record_metrics "failed" "TIMEOUT" "Process timed out after $MAX_RETRIES retries"
         continue 2
       fi
@@ -1052,8 +1219,16 @@ for i in $(seq 1 $MAX_ITERATIONS); do
 
     # Check for transient API errors
     if echo "$OUTPUT" | grep -qE "No messages returned|ECONNRESET|ETIMEDOUT|rate limit|503|502|504|unhandled.*promise|rejected.*reason"; then
+      MATCHED_ERROR=$(echo "$OUTPUT" | grep -oE "No messages returned|ECONNRESET|ETIMEDOUT|rate limit|503|502|504|unhandled.*promise|rejected.*reason" | head -1)
       echo ""
       echo "  ⚠ Transient API error detected (attempt $retry/$MAX_RETRIES)"
+      log_verbose "API ERROR: Matched pattern '$MATCHED_ERROR'"
+      log_verbose "API ERROR: Full output length: ${#OUTPUT} chars"
+      if [ "$VERBOSE" = true ]; then
+        echo "  Error pattern: $MATCHED_ERROR"
+        echo "  Response preview:"
+        echo "$OUTPUT" | head -20 | sed 's/^/    /'
+      fi
       if [ "$retry" -lt "$MAX_RETRIES" ]; then
         echo "  Retrying in ${RETRY_DELAY}s..."
         sleep "$RETRY_DELAY"
@@ -1061,6 +1236,7 @@ for i in $(seq 1 $MAX_ITERATIONS); do
         continue
       else
         echo "  ✗ Max retries exceeded. Saving error response."
+        log_error "Max retries exceeded for API error: $MATCHED_ERROR"
         echo ""
         echo "═══════════════════════════════════════════════════════"
         echo "  CLAUDE API ERROR - Last Response:"
@@ -1077,6 +1253,22 @@ for i in $(seq 1 $MAX_ITERATIONS); do
     if [ -z "$OUTPUT" ] || [ ${#OUTPUT} -lt 50 ]; then
       echo ""
       echo "  ⚠ Empty or minimal response (attempt $retry/$MAX_RETRIES)"
+      log_verbose "EMPTY RESPONSE: Output length: ${#OUTPUT} chars (threshold: 50)"
+      log_verbose "EMPTY RESPONSE: Exit code: $CLAUDE_EXIT_CODE"
+      if [ "$VERBOSE" = true ]; then
+        echo "  Output length: ${#OUTPUT} characters"
+        echo "  Exit code: $CLAUDE_EXIT_CODE"
+        if [ -n "$OUTPUT" ]; then
+          echo "  Response content:"
+          echo "$OUTPUT" | sed 's/^/    /'
+        else
+          echo "  Response content: (completely empty)"
+        fi
+        if [ -n "$STDERR_CONTENT" ]; then
+          echo "  Stderr content:"
+          echo "$STDERR_CONTENT" | head -20 | sed 's/^/    /'
+        fi
+      fi
       if [ "$retry" -lt "$MAX_RETRIES" ]; then
         echo "  Retrying in ${RETRY_DELAY}s..."
         sleep "$RETRY_DELAY"
@@ -1084,6 +1276,16 @@ for i in $(seq 1 $MAX_ITERATIONS); do
         continue
       else
         echo "  ✗ Max retries exceeded for empty response."
+        log_error "Max retries exceeded for empty response (${#OUTPUT} chars)"
+        if [ "$VERBOSE" = true ]; then
+          echo ""
+          echo "  Diagnostic info:"
+          echo "    - Prompt file exists: $([ -f "$PROMPT_FILE" ] && echo "yes" || echo "NO")"
+          echo "    - Prompt file size: $(wc -c < "$PROMPT_FILE" 2>/dev/null | tr -d ' ' || echo "N/A") bytes"
+          echo "    - Config file exists: $([ -f "$CONFIG_FILE" ] && echo "yes" || echo "NO")"
+          echo "    - Claude command: claude --dangerously-skip-permissions --print"
+          echo "    - Check if Claude CLI is authenticated: run 'claude --version' and 'claude config'"
+        fi
         record_metrics "failed" "EMPTY_RESPONSE" "Empty response after $MAX_RETRIES retries"
         continue 2
       fi
@@ -1091,11 +1293,14 @@ for i in $(seq 1 $MAX_ITERATIONS); do
 
     # Success - break out of retry loop
     CLAUDE_SUCCESS=true
+    log_verbose "API call successful on attempt $retry"
+    log_verbose "Response length: ${#OUTPUT} characters"
     break
   done
 
   if [ "$CLAUDE_SUCCESS" != "true" ]; then
     echo "Iteration $i failed due to API issues. Continuing to next iteration..."
+    log_verbose "Iteration $i failed - moving to next iteration"
     sleep 2
     continue
   fi
@@ -1196,9 +1401,20 @@ EOF
 
   # For Objective mode: extract metrics and update objective.json
   if [ "$MODE" = "objective" ]; then
+    log_verbose "Processing objective mode metrics..."
     EXTRACTED_METRICS=$(extract_metrics "$OUTPUT")
     if [ -n "$EXTRACTED_METRICS" ]; then
       echo "  Extracted metrics: $EXTRACTED_METRICS"
+      log_verbose "Metrics extracted successfully: $EXTRACTED_METRICS"
+    else
+      log_verbose "No metrics extracted from output"
+      if [ "$VERBOSE" = true ]; then
+        echo "  ⚠ No <metrics> block found - checking output for metrics pattern..."
+        if echo "$OUTPUT" | grep -q "accuracy\|precision\|recall"; then
+          echo "  Hint: Output contains metric keywords but no <metrics> block"
+          echo "  Agent may have forgotten to wrap metrics in <metrics>...</metrics> tags"
+        fi
+      fi
     fi
     update_objective_metrics "$i" "$EXTRACTED_METRICS"
 

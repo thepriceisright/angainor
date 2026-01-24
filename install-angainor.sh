@@ -2,10 +2,13 @@
 #
 # install-angainor.sh - Install Angainor (autonomous AI agent loop) into your project
 #
-# Usage: curl -fsSL https://raw.githubusercontent.com/thepriceisright/angainor/main/install-angainor.sh | bash
-#    or: ./install-angainor.sh [target-directory]
+# Usage:
+#   curl -fsSL https://raw.githubusercontent.com/thepriceisright/angainor/main/install-angainor.sh | bash
+#   curl -fsSL https://raw.githubusercontent.com/thepriceisright/angainor/main/install-angainor.sh | bash -s /path/to/project
+#   ./install-angainor.sh [target-directory]
 #
-# This script downloads and configures Angainor for running autonomous PRD execution.
+# This script downloads and configures Angainor for running autonomous PRD execution
+# and goal-seeking Objective mode.
 #
 
 set -euo pipefail
@@ -222,7 +225,15 @@ install_angainor() {
 #
 # angainor.sh - Wrapper to run Angainor from the .angainor directory
 #
-# Usage: ./angainor.sh [max_iterations]
+# Usage: ./angainor.sh [OPTIONS] [max_iterations]
+#
+# Options:
+#   --prd             Run in PRD mode (default)
+#   --objective       Run in Objective mode
+#   --verbose, -v     Enable verbose output for debugging
+#   --debug           Enable debug logging to angainor-debug.log
+#   --debug=FILE      Enable debug logging to specific file
+#   --help, -h        Show help message
 #
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -248,11 +259,13 @@ WRAPPER_EOF
     tmp_script=$(mktemp)
 
     # Use awk to:
-    # 1. Replace SCRIPT_DIR line with conditional that respects ANGAINOR_PROJECT_ROOT
+    # 1. Replace the first SCRIPT_DIR definition with conditional that respects ANGAINOR_PROJECT_ROOT
     # 2. Add ANGAINOR_LIB_DIR for library files (prompt.md, etc.)
-    # 3. Update prompt.md reference to use ANGAINOR_LIB_DIR
+    # 3. Update file references to use ANGAINOR_LIB_DIR
+    # Note: SCRIPT_DIR is now defined early in the script (before argument parsing)
     awk '
-    /^SCRIPT_DIR=/ {
+    # Match the first SCRIPT_DIR= line (early definition for --debug default path)
+    /^SCRIPT_DIR=.*\$\(cd.*dirname/ && !patched {
         print "# Use project root if set by wrapper, otherwise use script location"
         print "if [ -n \"${ANGAINOR_PROJECT_ROOT:-}\" ]; then"
         print "    SCRIPT_DIR=\"$ANGAINOR_PROJECT_ROOT\""
@@ -261,11 +274,15 @@ WRAPPER_EOF
         print "    SCRIPT_DIR=\"$(cd \"$(dirname \"${BASH_SOURCE[0]}\")\" && pwd)\""
         print "    ANGAINOR_LIB_DIR=\"$SCRIPT_DIR\""
         print "fi"
+        patched = 1
         next
     }
-    # Update prompt.md reference to use ANGAINOR_LIB_DIR
+    # Update prompt.md references to use ANGAINOR_LIB_DIR
     /\$SCRIPT_DIR\/prompt\.md/ {
         gsub(/\$SCRIPT_DIR\/prompt\.md/, "$ANGAINOR_LIB_DIR/prompt.md")
+    }
+    /\$SCRIPT_DIR\/objective-prompt\.md/ {
+        gsub(/\$SCRIPT_DIR\/objective-prompt\.md/, "$ANGAINOR_LIB_DIR/objective-prompt.md")
     }
     { print }
     ' "$main_script" > "$tmp_script" && mv "$tmp_script" "$main_script"
@@ -322,6 +339,13 @@ WRAPPER_EOF
     echo "     - Use /angainor skill to convert a markdown PRD, or"
     echo "     - Copy from $ANGAINOR_DIR/prd.json.example"
     echo "  3. Run: ./angainor.sh [max_iterations]"
+    echo ""
+    echo -e "${BLUE}Usage:${NC}"
+    echo "  ./angainor.sh                    # PRD mode, 10 iterations"
+    echo "  ./angainor.sh --objective 20     # Objective mode, 20 iterations"
+    echo "  ./angainor.sh --verbose          # Verbose output for debugging"
+    echo "  ./angainor.sh --debug            # Full debug logging"
+    echo "  ./angainor.sh --help             # Show all options"
     echo ""
     echo -e "${BLUE}Skills available:${NC}"
     echo "  /prd       - Generate a PRD from feature description"

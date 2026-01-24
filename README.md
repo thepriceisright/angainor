@@ -26,9 +26,31 @@ Based on [Geoffrey Huntley's Ralph pattern](https://ghuntley.com/ralph/).
 
 ### Installation
 
+**Option 1: One-line install (recommended)**
+
+Install Angainor into your existing project:
+
 ```bash
-git clone https://github.com/thepriceisright/claude-and-ralph.git
-cd claude-and-ralph
+# Install to current directory
+curl -fsSL https://raw.githubusercontent.com/thepriceisright/angainor/main/install-angainor.sh | bash
+
+# Install to a specific directory
+curl -fsSL https://raw.githubusercontent.com/thepriceisright/angainor/main/install-angainor.sh | bash -s /path/to/project
+```
+
+This creates:
+- `./angainor.sh` - Main entry point
+- `./.angainor/` - Angainor internals (prompt templates, scripts)
+- `./.mcp.json` - MCP config for headless browser testing
+- `~/.claude/skills/{prd,angainor,objective,read-transcript}/` - Global skills
+
+**Option 2: Clone repository**
+
+For development or to explore the codebase:
+
+```bash
+git clone https://github.com/thepriceisright/angainor.git
+cd angainor
 ```
 
 ### Running Angainor
@@ -49,6 +71,21 @@ cd claude-and-ralph
 ./angainor.sh --objective      # Run up to 10 iterations
 ./angainor.sh --objective 15   # Run up to 15 iterations
 ```
+
+**Debugging** - Troubleshoot empty responses or API issues:
+
+```bash
+./angainor.sh --verbose            # Show detailed API call info
+./angainor.sh --debug              # Log everything to angainor-debug.log
+./angainor.sh --debug=/tmp/log.txt # Custom debug log path
+./angainor.sh --help               # Show all options
+```
+
+The verbose mode shows:
+- Claude CLI version and command being executed
+- Response lengths, exit codes, and stderr content
+- Error patterns matched for API failures
+- Diagnostic hints when metrics blocks are missing
 
 ## Execution Modes
 

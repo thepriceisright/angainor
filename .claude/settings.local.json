@@ -22,56 +22,42 @@
       "WebFetch(domain:www.npmjs.com)",
       "WebSearch",
       "mcp__plugin_playwright_playwright__browser_navigate",
-
       "Skill(prd)",
       "Skill(ralph)",
       "Skill(angainor)",
       "Skill(read-transcript)",
-
       "Skill(feature-dev:feature-dev)",
       "Skill(code-review:code-review)",
-
       "Skill(commit-commands:commit)",
       "Skill(commit-commands:commit-push-pr)",
       "Skill(commit-commands:clean_gone)",
-
       "Skill(pr-review-toolkit:review-pr)",
-
       "Skill(collaboration-modes:collab)",
-
       "Skill(full-codebase-review:full-review)",
       "Skill(learn-from-prs:learn-from-prs)",
-
       "Skill(task-check:check)",
-
       "Skill(track-and-improve:trk-review)",
       "Skill(track-and-improve:trk)",
       "Skill(track-and-improve:trk-resolve)",
-
       "Skill(safety-net:set-statusline)",
       "Skill(safety-net:set-custom-rules)",
       "Skill(safety-net:verify-custom-rules)",
-
       "Skill(vercel:deploy)",
       "Skill(vercel:setup)",
       "Skill(vercel:logs)",
-
       "Skill(stripe:explain-error)",
       "Skill(stripe:test-cards)",
       "Skill(stripe:stripe-best-practices)",
-
       "Skill(security-scanning:security-sast)",
       "Skill(security-scanning:security-requirement-extraction)",
       "Skill(security-scanning:threat-mitigation-mapping)",
       "Skill(security-scanning:sast-configuration)",
       "Skill(security-scanning:stride-analysis-patterns)",
       "Skill(security-scanning:attack-tree-construction)",
-
       "Skill(platform-tools:use-mcp)",
       "Skill(platform-tools:mcp-builder)",
       "Skill(platform-tools:mcp-management)",
       "Skill(platform-tools:shopify)",
-
       "Skill(superpowers:systematic-debugging)",
       "Skill(superpowers:subagent-driven-development)",
       "Skill(superpowers:writing-plans)",
@@ -86,9 +72,7 @@
       "Skill(superpowers:receiving-code-review)",
       "Skill(superpowers:dispatching-parallel-agents)",
       "Skill(superpowers:brainstorming)",
-
       "Skill(frontend-design:frontend-design)",
-
       "Skill(huggingface-skills:hugging-face-model-trainer)",
       "Skill(huggingface-skills:hugging-face-cli)",
       "Skill(huggingface-skills:hugging-face-jobs)",
@@ -97,7 +81,6 @@
       "Skill(huggingface-skills:hugging-face-tool-builder)",
       "Skill(huggingface-skills:hugging-face-trackio)",
       "Skill(huggingface-skills:hugging-face-paper-publisher)",
-
       "Skill(llm-application-dev:langchain-architecture)",
       "Skill(llm-application-dev:vector-index-tuning)",
       "Skill(llm-application-dev:llm-evaluation)",
@@ -106,18 +89,14 @@
       "Skill(llm-application-dev:similarity-search-patterns)",
       "Skill(llm-application-dev:hybrid-search-implementation)",
       "Skill(llm-application-dev:prompt-engineering-patterns)",
-
       "Skill(machine-learning-ops:ml-pipeline-workflow)",
-
       "Skill(python-development:async-python-patterns)",
       "Skill(python-development:uv-package-manager)",
       "Skill(python-development:python-performance-optimization)",
       "Skill(python-development:python-packaging)",
       "Skill(python-development:python-testing-patterns)",
-
       "Skill(quantitative-trading:backtesting-frameworks)",
       "Skill(quantitative-trading:risk-metrics-calculation)",
-
       "Skill(development-skills:tdd-process)",
       "Skill(development-skills:writing-tests)",
       "Skill(development-skills:lightweight-task-workflow)",
@@ -134,12 +113,10 @@
       "Skill(development-skills:questions-are-not-instructions)",
       "Skill(development-skills:create-tasks)",
       "Skill(development-skills:typescript-backend-project-setup)",
-
       "Skill(cicd-automation:secrets-management)",
       "Skill(cicd-automation:deployment-pipeline-design)",
       "Skill(cicd-automation:gitlab-ci-patterns)",
       "Skill(cicd-automation:github-actions-templates)",
-
       "Skill(cloud-infrastructure:terraform-module-library)",
       "Skill(cloud-infrastructure:hybrid-cloud-networking)",
       "Skill(cloud-infrastructure:linkerd-patterns)",
@@ -148,10 +125,13 @@
       "Skill(cloud-infrastructure:cost-optimization)",
       "Skill(cloud-infrastructure:multi-cloud-architecture)",
       "Skill(cloud-infrastructure:service-mesh-observability)",
-
       "Skill(code-documentation:tutorial-engineer)",
       "Skill(code-documentation:code-reviewer)",
-      "Skill(code-documentation:docs-architect)"
+      "Skill(code-documentation:docs-architect)",
+      "Bash(bash -n:*)",
+      "Bash(/workspace/repos/claude-and-ralph/angainor.sh:*)",
+      "Bash(chmod:*)",
+      "Bash(./angainor.sh:*)"
     ]
   }
 }

@@ -45,11 +45,32 @@ Angainor supports two distinct execution modes:
 # Run Angainor in Objective mode (from a project that has objective.json)
 ./angainor.sh --objective [max_iterations]
 
+# Debugging options
+./angainor.sh --objective --verbose 100     # Verbose output for debugging
+./angainor.sh --objective --debug 100       # Full debug logging to angainor-debug.log
+./angainor.sh --objective --debug=/path/to/file.log 100  # Custom debug log path
+
+# Help
+./angainor.sh --help                  # Show all options
+
 # Flowchart visualization (interactive React Flow diagram)
 cd flowchart && npm install && npm run dev    # dev server
 cd flowchart && npm run build                 # production build
 cd flowchart && npm run lint                  # lint check
 ```
+
+### Debugging Options
+
+| Flag | Description |
+|------|-------------|
+| `--verbose`, `-v` | Show detailed info during API calls (response lengths, exit codes, stderr) |
+| `--debug` | Write full debug log to `angainor-debug.log` (implies verbose) |
+| `--debug=FILE` | Write debug log to custom path |
+
+**When to use:**
+- **Empty responses**: Use `--verbose` to see what Claude is returning
+- **API errors**: Use `--verbose` to see the actual error patterns matched
+- **Full diagnosis**: Use `--debug` to capture everything for later analysis
 
 ## Repository Structure
 
