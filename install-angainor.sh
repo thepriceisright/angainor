@@ -294,11 +294,13 @@ WRAPPER_EOF
     local gitignore_entries=(
         "# Angainor generated files"
         "prd.json"
+        "objective.json"
         "progress.txt"
         ".last-branch"
         "transcripts/"
         "screenshots/"
         "metrics.json"
+        "angainor-debug.log"
     )
 
     if [ -f "$TARGET_DIR/.gitignore" ]; then
@@ -345,6 +347,8 @@ WRAPPER_EOF
     echo "  ./angainor.sh --objective 20     # Objective mode, 20 iterations"
     echo "  ./angainor.sh --verbose          # Verbose output for debugging"
     echo "  ./angainor.sh --debug            # Full debug logging"
+    echo "  ./angainor.sh --timeout=3600     # Set iteration timeout (seconds)"
+    echo "  ./angainor.sh --no-timeout       # Disable timeout for long benchmarks"
     echo "  ./angainor.sh --help             # Show all options"
     echo ""
     echo -e "${BLUE}Skills available:${NC}"

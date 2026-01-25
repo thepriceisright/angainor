@@ -1196,6 +1196,55 @@ for i in $(seq 1 $MAX_ITERATIONS); do
   TIMESTAMP=$(date +%Y-%m-%d-%H-%M-%S)
   TRANSCRIPT_FILE="$TRANSCRIPT_DIR/$TIMESTAMP-iteration-$i.txt"
 
+  # For Objective mode: generate dynamic prompt with iteration context
+  if [ "$MODE" = "objective" ]; then
+    DYNAMIC_PROMPT_FILE=$(mktemp)
+
+    # Extract current status from objective.json
+    CURRENT_ITERATIONS=$(jq -r '.status.iterations // 0' "$CONFIG_FILE")
+    BEST_METRICS=$(jq -c '.status.bestMetrics // {}' "$CONFIG_FILE")
+    CURRENT_STATE=$(jq -r '.status.state // "pending"' "$CONFIG_FILE")
+    SUCCESS_CRITERIA=$(jq -r '.verification.successCriteria // ""' "$CONFIG_FILE")
+
+    # Create dynamic header with iteration context
+    cat > "$DYNAMIC_PROMPT_FILE" << DYNAMIC_HEADER
+# ⚠️ ITERATION $i - YOU MUST EXIT AFTER ONE EXPERIMENT
+
+**THIS IS ITERATION $i.** Previous iterations completed: $CURRENT_ITERATIONS
+**Best metrics so far:** $BEST_METRICS
+**Success criteria:** $SUCCESS_CRITERIA
+**Current state:** $CURRENT_STATE
+
+## YOUR ONE JOB THIS ITERATION:
+1. Read progress.txt to see what was tried
+2. Form ONE hypothesis
+3. Implement ONE change
+4. Run the benchmark
+5. Output <metrics>{...}</metrics>
+6. Output <iteration>COMPLETE</iteration>
+7. **STOP IMMEDIATELY - DO NOT CONTINUE**
+
+After outputting \`<iteration>COMPLETE</iteration>\`, angainor.sh will:
+- Parse your metrics
+- Update objective.json
+- Spawn iteration $((i + 1)) with fresh context
+
+**DO NOT run multiple experiments. DO NOT keep iterating. EXIT after ONE experiment.**
+
+---
+
+DYNAMIC_HEADER
+
+    # Append the static prompt content
+    cat "$PROMPT_FILE" >> "$DYNAMIC_PROMPT_FILE"
+
+    # Use dynamic prompt for this iteration
+    EFFECTIVE_PROMPT_FILE="$DYNAMIC_PROMPT_FILE"
+    log_verbose "Generated dynamic prompt with iteration $i context"
+  else
+    EFFECTIVE_PROMPT_FILE="$PROMPT_FILE"
+  fi
+
   # Run Claude with retry logic for transient API errors
   MAX_RETRIES=3
   RETRY_DELAY=5
@@ -1245,7 +1294,7 @@ for i in $(seq 1 $MAX_ITERATIONS); do
     fi
 
     log_verbose "Timeout command: ${TIMEOUT_CMD:-'(none - no timeout)'}"
-    log_verbose "Claude command: claude --dangerously-skip-permissions --print < $PROMPT_FILE"
+    log_verbose "Claude command: claude --dangerously-skip-permissions --print < $EFFECTIVE_PROMPT_FILE"
 
     # Capture stderr separately for debugging
     STDERR_FILE=$(mktemp)
@@ -1269,10 +1318,10 @@ for i in $(seq 1 $MAX_ITERATIONS); do
     # NOTE: --print mode has issues with very long sessions (>30min) where
     # "No messages returned" error occurs. Using --output-format json as fallback.
     if [ -n "$TIMEOUT_CMD" ]; then
-      $TIMEOUT_CMD claude --dangerously-skip-permissions --print --output-format text < "$PROMPT_FILE" > "$STDOUT_FILE" 2> "$STDERR_FILE" &
+      $TIMEOUT_CMD claude --dangerously-skip-permissions --print --output-format text < "$EFFECTIVE_PROMPT_FILE" > "$STDOUT_FILE" 2> "$STDERR_FILE" &
       CLAUDE_PID=$!
     else
-      claude --dangerously-skip-permissions --print --output-format text < "$PROMPT_FILE" > "$STDOUT_FILE" 2> "$STDERR_FILE" &
+      claude --dangerously-skip-permissions --print --output-format text < "$EFFECTIVE_PROMPT_FILE" > "$STDOUT_FILE" 2> "$STDERR_FILE" &
       CLAUDE_PID=$!
     fi
 
@@ -1627,6 +1676,12 @@ EOF
 
   # Extract skill candidates from iteration output (failures don't break loop)
   write_skill_candidate "$OUTPUT" "$STORY_ID" || true
+
+  # Clean up dynamic prompt file if created
+  if [ -n "$DYNAMIC_PROMPT_FILE" ] && [ -f "$DYNAMIC_PROMPT_FILE" ]; then
+    rm -f "$DYNAMIC_PROMPT_FILE"
+    DYNAMIC_PROMPT_FILE=""
+  fi
 
   echo "Iteration $i complete. Continuing..."
   sleep 2
