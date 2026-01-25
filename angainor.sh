@@ -15,6 +15,7 @@ MAX_ITERATIONS=""
 VERBOSE=false
 DEBUG_LOG=""
 CLAUDE_TIMEOUT=""  # Will be set to default later if not specified
+LIVE_OUTPUT=false  # Show Claude output in real-time
 
 while [[ $# -gt 0 ]]; do
   case $1 in
@@ -52,6 +53,11 @@ while [[ $# -gt 0 ]]; do
       CLAUDE_TIMEOUT="0"
       shift
       ;;
+    --live)
+      # Show Claude output in real-time (stream to terminal while capturing)
+      LIVE_OUTPUT=true
+      shift
+      ;;
     --help|-h)
       echo "Usage: ./angainor.sh [OPTIONS] [max_iterations]"
       echo ""
@@ -60,6 +66,7 @@ while [[ $# -gt 0 ]]; do
       echo "  --objective       Run in Objective mode"
       echo "  --timeout=SECS    Set iteration timeout (default: 1800s objective, 600s PRD)"
       echo "  --no-timeout      Disable iteration timeout entirely"
+      echo "  --live            Stream Claude output in real-time (follow along as it works)"
       echo "  --verbose, -v     Enable verbose output for debugging"
       echo "  --debug           Enable debug logging to angainor-debug.log"
       echo "  --debug=FILE      Enable debug logging to specific file"
@@ -1113,6 +1120,9 @@ else
 fi
 
 echo "Starting Angainor in $MODE_DISPLAY mode - Max iterations: $MAX_ITERATIONS"
+if [ "$LIVE_OUTPUT" = true ]; then
+  echo "Live output: ENABLED (Claude output will stream to terminal)"
+fi
 if [ "$VERBOSE" = true ]; then
   echo "Verbose mode: ENABLED"
   echo "Iteration timeout: $EFFECTIVE_TIMEOUT"
@@ -1318,12 +1328,28 @@ DYNAMIC_HEADER
     #
     # NOTE: --print mode has issues with very long sessions (>30min) where
     # "No messages returned" error occurs. Using --output-format json as fallback.
-    if [ -n "$TIMEOUT_CMD" ]; then
-      $TIMEOUT_CMD claude --dangerously-skip-permissions --print --output-format text < "$EFFECTIVE_PROMPT_FILE" > "$STDOUT_FILE" 2> "$STDERR_FILE" &
-      CLAUDE_PID=$!
+    if [ "$LIVE_OUTPUT" = true ]; then
+      # Live mode: stream output to terminal while capturing to file using tee
+      echo ""
+      echo "───────────────────────────────────────────────────────"
+      echo "  LIVE OUTPUT (Claude is working...)"
+      echo "───────────────────────────────────────────────────────"
+      if [ -n "$TIMEOUT_CMD" ]; then
+        $TIMEOUT_CMD claude --dangerously-skip-permissions --print --output-format text < "$EFFECTIVE_PROMPT_FILE" 2> "$STDERR_FILE" | tee "$STDOUT_FILE" &
+        CLAUDE_PID=$!
+      else
+        claude --dangerously-skip-permissions --print --output-format text < "$EFFECTIVE_PROMPT_FILE" 2> "$STDERR_FILE" | tee "$STDOUT_FILE" &
+        CLAUDE_PID=$!
+      fi
     else
-      claude --dangerously-skip-permissions --print --output-format text < "$EFFECTIVE_PROMPT_FILE" > "$STDOUT_FILE" 2> "$STDERR_FILE" &
-      CLAUDE_PID=$!
+      # Normal mode: capture to file only (no terminal output)
+      if [ -n "$TIMEOUT_CMD" ]; then
+        $TIMEOUT_CMD claude --dangerously-skip-permissions --print --output-format text < "$EFFECTIVE_PROMPT_FILE" > "$STDOUT_FILE" 2> "$STDERR_FILE" &
+        CLAUDE_PID=$!
+      else
+        claude --dangerously-skip-permissions --print --output-format text < "$EFFECTIVE_PROMPT_FILE" > "$STDOUT_FILE" 2> "$STDERR_FILE" &
+        CLAUDE_PID=$!
+      fi
     fi
 
     # Wait for Claude to complete (this allows interrupt signals to be caught)
@@ -1331,6 +1357,13 @@ DYNAMIC_HEADER
     CLAUDE_EXIT_CODE=$?
     CLAUDE_PID=""  # Clear PID after completion
 
+    # Show end of live output
+    if [ "$LIVE_OUTPUT" = true ]; then
+      echo ""
+      echo "───────────────────────────────────────────────────────"
+      echo "  END LIVE OUTPUT"
+      echo "───────────────────────────────────────────────────────"
+    fi
 
     # Read captured output from files
     OUTPUT=$(cat "$STDOUT_FILE" 2>/dev/null || echo "")
