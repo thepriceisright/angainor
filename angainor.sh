@@ -1457,23 +1457,45 @@ DYNAMIC_HEADER
           echo ""
           echo "  Synthesizing iteration completion..."
 
-          # Try to extract metrics from progress.txt
-          EXTRACTED_ACCURACY=""
+          # Try to extract actual metrics from progress.txt
+          # Format in progress.txt: "**fixture_type_accuracy: 0.8571 → 0.9333 (+7.62%)**"
+          # We want to extract the "after" value (0.9333)
+          EXTRACTED_METRICS="{}"
           if [ -f "$PROGRESS_FILE" ]; then
-            # Look for accuracy patterns like "85.71%" or "fixture_type_accuracy: 0.8571"
-            EXTRACTED_ACCURACY=$(tail -100 "$PROGRESS_FILE" | grep -oE '[0-9]+\.[0-9]+%|fixture_type_accuracy[^0-9]*[0-9]+\.[0-9]+' | tail -1 || echo "")
+            # Get the metrics we're tracking from objective.json
+            METRICS_TO_TRACK=$(jq -r '.verification.metricsToTrack // [] | .[]' "$CONFIG_FILE" 2>/dev/null)
+
+            # For each metric, try to find it in progress.txt
+            for metric in $METRICS_TO_TRACK; do
+              # Pattern: "metric_name: X → Y" - extract Y (the after value)
+              # Also handle "metric_name: Y" without arrow
+              METRIC_VALUE=$(tail -150 "$PROGRESS_FILE" | grep -oE "${metric}[^0-9]*[0-9]+\.[0-9]+ *→ *[0-9]+\.[0-9]+" | tail -1 | grep -oE '[0-9]+\.[0-9]+$' || echo "")
+              if [ -z "$METRIC_VALUE" ]; then
+                # Try pattern without arrow: "metric_name: Y"
+                METRIC_VALUE=$(tail -150 "$PROGRESS_FILE" | grep -oE "${metric}[^0-9]*[0-9]+\.[0-9]+" | tail -1 | grep -oE '[0-9]+\.[0-9]+' || echo "")
+              fi
+              if [ -n "$METRIC_VALUE" ]; then
+                EXTRACTED_METRICS=$(echo "$EXTRACTED_METRICS" | jq --arg k "$metric" --argjson v "$METRIC_VALUE" '. + {($k): $v}')
+                echo "    Extracted $metric: $METRIC_VALUE"
+              fi
+            done
           fi
 
-          # Create synthetic output
+          # If we couldn't extract any metrics, use a placeholder
+          if [ "$EXTRACTED_METRICS" = "{}" ]; then
+            EXTRACTED_METRICS='{"note": "metrics not found in progress.txt - manual review needed"}'
+            echo "    ⚠ Could not extract metrics from progress.txt"
+          fi
+
+          # Create synthetic output with actual metrics
           OUTPUT="[Transcript lost due to Claude CLI --print bug - but work was done]
 
 ## Evidence of work:
 Commits: $RECENT_COMMITS
 Progress updated: $PROGRESS_MODIFIED
-Extracted accuracy: ${EXTRACTED_ACCURACY:-unknown}
 
 <metrics>
-{\"note\": \"metrics extracted from git/progress\", \"accuracy_hint\": \"${EXTRACTED_ACCURACY:-see progress.txt}\"}
+$EXTRACTED_METRICS
 </metrics>
 
 <iteration>COMPLETE</iteration>"
@@ -1584,12 +1606,16 @@ EOF
   # Verify that verification was provided (enforcement of US-003 requirement)
   # Accept either <verification> XML blocks OR ✅ checkmarks as valid verification
   # Skip for synthesized iterations (recovered from git evidence)
+  # Skip for objective mode (uses <metrics> + <iteration>COMPLETE</iteration> instead)
   VERIFICATION_FAILED=false
   FAILURE_REASON=""
 
   if [ "$ITERATION_SYNTHESIZED" = true ]; then
     log_verbose "Skipping verification check for synthesized iteration (git evidence)"
     echo "  ✓ Iteration recovered from git evidence - skipping verification"
+  elif [ "$MODE" = "objective" ]; then
+    # Objective mode uses <metrics> and <iteration>COMPLETE</iteration> signals, not <verification>
+    log_verbose "Skipping PRD verification check for objective mode"
   else
     # Check if any verification exists (XML format or checkmark format)
     # Note: grep -c outputs "0" AND exits 1 when no matches, so fallback must be outside $()
