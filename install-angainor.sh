@@ -289,30 +289,16 @@ WRAPPER_EOF
     chmod +x "$main_script"
     log_success "Patched angainor.sh"
 
-    # Create/update .gitignore
-    log_info "Updating .gitignore..."
-    local gitignore_entries=(
-        "# Angainor generated files"
-        "prd.json"
-        "objective.json"
-        "progress.txt"
-        ".last-branch"
-        "transcripts/"
-        "screenshots/"
-        "metrics.json"
-        "angainor-debug.log"
-    )
-
-    if [ -f "$TARGET_DIR/.gitignore" ]; then
-        for entry in "${gitignore_entries[@]}"; do
-            if ! grep -qF "$entry" "$TARGET_DIR/.gitignore" 2>/dev/null; then
-                echo "$entry" >> "$TARGET_DIR/.gitignore"
-            fi
-        done
-    else
-        printf '%s\n' "${gitignore_entries[@]}" > "$TARGET_DIR/.gitignore"
-    fi
-    log_success "Updated .gitignore"
+    # Suggest .gitignore entries (don't modify automatically - user manages their own gitignore)
+    # Note: prd.json, objective.json, progress.txt are intentionally NOT listed
+    # because users may want to track these for cross-machine iteration continuity
+    log_info "Suggested .gitignore entries (add manually if desired):"
+    echo "    # Angainor temporary/generated files"
+    echo "    .last-branch"
+    echo "    transcripts/"
+    echo "    screenshots/"
+    echo "    metrics.json"
+    echo "    angainor-debug.log"
 
     # Note: Skills are installed globally to ~/.claude/skills/ for Claude Code discovery
     log_success "Skills installed globally to ~/.claude/skills/"
