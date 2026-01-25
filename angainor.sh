@@ -1358,6 +1358,9 @@ DYNAMIC_HEADER
       # NOTE: Without --print, Claude runs interactively showing progress.
       # We use 'script' to capture the terminal output for later processing.
       # The captured output will include ANSI codes and spinner artifacts.
+      #
+      # IMPORTANT: We must send /exit after the prompt to make Claude exit cleanly.
+      # Otherwise it waits for more input and the script hangs.
       echo ""
       echo "───────────────────────────────────────────────────────"
       echo "  LIVE OUTPUT (Claude is working...)"
@@ -1366,11 +1369,12 @@ DYNAMIC_HEADER
 
       # Run Claude interactively with script capturing output
       # -q = quiet, -e = return exit code, -c = command
+      # We send /exit after the prompt to ensure Claude exits when done
       if [ -n "$TIMEOUT_CMD" ]; then
-        $TIMEOUT_CMD script -q -e -c "cat '$EFFECTIVE_PROMPT_FILE' | claude --dangerously-skip-permissions" "$STDOUT_FILE" 2> "$STDERR_FILE" &
+        $TIMEOUT_CMD script -q -e -c "(cat '$EFFECTIVE_PROMPT_FILE'; echo ''; echo '/exit') | claude --dangerously-skip-permissions" "$STDOUT_FILE" 2> "$STDERR_FILE" &
         CLAUDE_PID=$!
       else
-        script -q -e -c "cat '$EFFECTIVE_PROMPT_FILE' | claude --dangerously-skip-permissions" "$STDOUT_FILE" 2> "$STDERR_FILE" &
+        script -q -e -c "(cat '$EFFECTIVE_PROMPT_FILE'; echo ''; echo '/exit') | claude --dangerously-skip-permissions" "$STDOUT_FILE" 2> "$STDERR_FILE" &
         CLAUDE_PID=$!
       fi
     else
@@ -1385,9 +1389,54 @@ DYNAMIC_HEADER
     fi
 
     # Wait for Claude to complete (this allows interrupt signals to be caught)
+    # For live mode, use a polling loop with a grace period to handle hanging processes
     echo "  [DEBUG] Waiting for Claude process (PID: $CLAUDE_PID)..."
-    wait "$CLAUDE_PID" 2>/dev/null || true
-    CLAUDE_EXIT_CODE=$?
+
+    if [ "$LIVE_OUTPUT" = true ]; then
+      # Polling wait with grace period for live mode
+      # The iteration timeout ($ITERATION_TIMEOUT) handles the main work period
+      # This grace period handles the case where Claude finished but script/pty hangs
+      GRACE_PERIOD=30  # seconds to wait after process appears done
+      POLL_INTERVAL=2
+      GRACE_START=""
+      LAST_SIZE=""
+
+      while kill -0 "$CLAUDE_PID" 2>/dev/null; do
+        # Check if stdout file has been stable (no changes) for a while
+        if [ -f "$STDOUT_FILE" ]; then
+          CURRENT_SIZE=$(wc -c < "$STDOUT_FILE" 2>/dev/null | tr -d ' ' || echo "0")
+
+          if [ -n "$LAST_SIZE" ] && [ "$CURRENT_SIZE" = "$LAST_SIZE" ]; then
+            # Output hasn't changed
+            if [ -z "$GRACE_START" ]; then
+              GRACE_START=$(date +%s)
+              log_verbose "Output stabilized, starting grace period ($GRACE_PERIOD s)"
+            else
+              ELAPSED=$(($(date +%s) - GRACE_START))
+              if [ $ELAPSED -ge $GRACE_PERIOD ]; then
+                echo "  ⚠ Process appears hung (no output for ${GRACE_PERIOD}s), terminating..."
+                kill -TERM "$CLAUDE_PID" 2>/dev/null || true
+                sleep 2
+                kill -KILL "$CLAUDE_PID" 2>/dev/null || true
+                break
+              fi
+            fi
+          else
+            # Output changed, reset grace period
+            GRACE_START=""
+            LAST_SIZE="$CURRENT_SIZE"
+          fi
+        fi
+        sleep $POLL_INTERVAL
+      done
+      wait "$CLAUDE_PID" 2>/dev/null || true
+      CLAUDE_EXIT_CODE=$?
+    else
+      # Normal mode: simple wait
+      wait "$CLAUDE_PID" 2>/dev/null || true
+      CLAUDE_EXIT_CODE=$?
+    fi
+
     echo "  [DEBUG] Claude process completed with exit code: $CLAUDE_EXIT_CODE"
     CLAUDE_PID=""  # Clear PID after completion
 
