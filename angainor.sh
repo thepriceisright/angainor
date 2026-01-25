@@ -1385,8 +1385,10 @@ DYNAMIC_HEADER
     fi
 
     # Wait for Claude to complete (this allows interrupt signals to be caught)
+    echo "  [DEBUG] Waiting for Claude process (PID: $CLAUDE_PID)..."
     wait "$CLAUDE_PID" 2>/dev/null || true
     CLAUDE_EXIT_CODE=$?
+    echo "  [DEBUG] Claude process completed with exit code: $CLAUDE_EXIT_CODE"
     CLAUDE_PID=""  # Clear PID after completion
 
     # Show end of live output
@@ -1398,6 +1400,7 @@ DYNAMIC_HEADER
     fi
 
     # Read captured output from files
+    echo "  [DEBUG] Reading captured output..."
     if [ "$LIVE_OUTPUT" = true ]; then
       # Strip ANSI escape codes from script output (interactive mode includes terminal formatting)
       OUTPUT=$(cat "$STDOUT_FILE" 2>/dev/null | sed 's/\x1b\[[0-9;]*[a-zA-Z]//g' | tr -d '\r' || echo "")
@@ -1405,6 +1408,7 @@ DYNAMIC_HEADER
       OUTPUT=$(cat "$STDOUT_FILE" 2>/dev/null || echo "")
     fi
     STDERR_CONTENT=$(cat "$STDERR_FILE" 2>/dev/null || echo "")
+    echo "  [DEBUG] Output captured: ${#OUTPUT} chars, stderr: ${#STDERR_CONTENT} chars"
 
     # Also write to transcript file
     cat "$STDOUT_FILE" > "$TRANSCRIPT_FILE" 2>/dev/null || true
@@ -1740,12 +1744,15 @@ EOF
     echo "  Output length: ${#OUTPUT} chars"
 
     # Check for iteration completion signal (required to properly bound iterations)
-    # Accept: <iteration>COMPLETE</iteration> OR any termination signal (SUCCESS, IMPOSSIBLE, PLATEAU)
-    HAS_ITERATION_COMPLETE=$(echo "$OUTPUT" | grep -cE "<iteration>COMPLETE</iteration>|<objective>(SUCCESS|IMPOSSIBLE|PLATEAU)</objective>") || HAS_ITERATION_COMPLETE=0
+    # Accept multiple formats:
+    #   - <iteration>COMPLETE</iteration> (preferred XML format)
+    #   - Just "COMPLETE" on its own line (Claude sometimes outputs this)
+    #   - Any termination signal (SUCCESS, IMPOSSIBLE, PLATEAU)
+    HAS_ITERATION_COMPLETE=$(echo "$OUTPUT" | grep -cE "<iteration>COMPLETE</iteration>|<objective>(SUCCESS|IMPOSSIBLE|PLATEAU)</objective>|^[[:space:]]*COMPLETE[[:space:]]*$") || HAS_ITERATION_COMPLETE=0
 
     if [ "$HAS_ITERATION_COMPLETE" -eq 0 ]; then
       echo "  ⚠ ITERATION BOUNDARY MISSING"
-      echo "    Agent did not output <iteration>COMPLETE</iteration> or termination signal."
+      echo "    Agent did not output COMPLETE or termination signal."
       log_verbose "Missing iteration boundary signal"
     else
       echo "  ✓ Iteration boundary signal found"
@@ -1840,9 +1847,12 @@ EOF
       print_metrics_summary
       exit 4
     fi
+
+    echo "  [DEBUG] All termination checks passed - iteration will continue"
   fi
 
   # Extract skill candidates from iteration output (failures don't break loop)
+  echo "  [DEBUG] Checking for skill candidates..."
   write_skill_candidate "$OUTPUT" "$STORY_ID" || true
 
   # Clean up dynamic prompt file if created
@@ -1851,6 +1861,8 @@ EOF
     DYNAMIC_PROMPT_FILE=""
   fi
 
+  echo ""
+  echo "  [DEBUG] Iteration $i complete - proceeding to next iteration in 2s..."
   echo "Iteration $i complete. Continuing..."
   sleep 2
 done
