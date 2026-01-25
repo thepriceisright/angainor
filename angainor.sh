@@ -1714,9 +1714,12 @@ EOF
      '.transcripts += [{"file": $file, "timestamp": $ts, "iteration": ($iter|tonumber), "branch": $branch, "storyId": $story}]' \
      "$TRANSCRIPT_INDEX" > "$TRANSCRIPT_INDEX.tmp" && mv "$TRANSCRIPT_INDEX.tmp" "$TRANSCRIPT_INDEX"
 
+  echo "  [DEBUG] Starting post-iteration processing..."
+
   # Check for completion signal FIRST - if all stories are done, no verification needed
   # Use anchored grep to avoid false positives when Claude mentions the tag in prose
   # (e.g., "I will not output <promise>COMPLETE</promise>")
+  echo "  [DEBUG] Checking for PRD completion signal..."
   if echo "$OUTPUT" | grep -qE "^[[:space:]]*<promise>COMPLETE</promise>[[:space:]]*$"; then
     echo ""
     echo "Angainor completed all tasks!"
@@ -1730,6 +1733,7 @@ EOF
   # Accept either <verification> XML blocks OR ✅ checkmarks as valid verification
   # Skip for synthesized iterations (recovered from git evidence)
   # Skip for objective mode (uses <metrics> + <iteration>COMPLETE</iteration> instead)
+  echo "  [DEBUG] Starting verification checks (mode=$MODE)..."
   VERIFICATION_FAILED=false
   FAILURE_REASON=""
 
@@ -1784,7 +1788,9 @@ EOF
   fi
 
   # Record successful iteration metrics
+  echo "  [DEBUG] Verification passed, recording metrics for story: $STORY_ID"
   record_metrics "success" "$STORY_ID" ""
+  echo "  [DEBUG] Metrics recorded, checking mode..."
 
   # For Objective mode: check for iteration boundary signal and extract metrics
   if [ "$MODE" = "objective" ]; then
