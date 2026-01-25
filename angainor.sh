@@ -921,25 +921,48 @@ update_objective_metrics() {
 
   # Build the jq update expression
   local jq_expr
+  local jq_error
+  local jq_result
+
+  echo "    iteration=$iteration, primary_metric=$primary_metric"
+  echo "    current_best=$current_best, new_value=$new_value"
+  echo "    should_update_best=$should_update_best"
+  echo "    history_entry=$history_entry"
 
   if [ "$should_update_best" = "true" ]; then
     # Update iterations, append to history, AND update bestMetrics
     jq_expr='.status.iterations = ($iter | tonumber) | .status.metricHistory += [$entry] | .status.bestMetrics = $metrics'
-    jq --argjson iter "$iteration" \
+    echo "    Running jq with bestMetrics update..."
+    jq_error=$(jq --argjson iter "$iteration" \
        --argjson entry "$history_entry" \
        --argjson metrics "$metrics_json" \
        "$jq_expr" \
-       "$CONFIG_FILE" > "$CONFIG_FILE.tmp" && mv "$CONFIG_FILE.tmp" "$CONFIG_FILE"
+       "$CONFIG_FILE" 2>&1 > "$CONFIG_FILE.tmp")
+    jq_result=$?
+    if [ $jq_result -eq 0 ]; then
+      mv "$CONFIG_FILE.tmp" "$CONFIG_FILE"
+    else
+      echo "    jq error: $jq_error"
+      rm -f "$CONFIG_FILE.tmp"
+    fi
   else
     # Update iterations and append to history only
     jq_expr='.status.iterations = ($iter | tonumber) | .status.metricHistory += [$entry]'
-    jq --argjson iter "$iteration" \
+    echo "    Running jq without bestMetrics update..."
+    jq_error=$(jq --argjson iter "$iteration" \
        --argjson entry "$history_entry" \
        "$jq_expr" \
-       "$CONFIG_FILE" > "$CONFIG_FILE.tmp" && mv "$CONFIG_FILE.tmp" "$CONFIG_FILE"
+       "$CONFIG_FILE" 2>&1 > "$CONFIG_FILE.tmp")
+    jq_result=$?
+    if [ $jq_result -eq 0 ]; then
+      mv "$CONFIG_FILE.tmp" "$CONFIG_FILE"
+    else
+      echo "    jq error: $jq_error"
+      rm -f "$CONFIG_FILE.tmp"
+    fi
   fi
 
-  if [ $? -eq 0 ]; then
+  if [ $jq_result -eq 0 ]; then
     echo "  ✓ Updated objective.json: iteration=$iteration, bestUpdated=$should_update_best"
     return 0
   else
@@ -1698,39 +1721,69 @@ EOF
 
   # For Objective mode: check for iteration boundary signal and extract metrics
   if [ "$MODE" = "objective" ]; then
+    echo ""
+    echo "  [Objective Mode Processing]"
+    echo "  Output length: ${#OUTPUT} chars"
+
     # Check for iteration completion signal (required to properly bound iterations)
     # Accept: <iteration>COMPLETE</iteration> OR any termination signal (SUCCESS, IMPOSSIBLE, PLATEAU)
     HAS_ITERATION_COMPLETE=$(echo "$OUTPUT" | grep -cE "<iteration>COMPLETE</iteration>|<objective>(SUCCESS|IMPOSSIBLE|PLATEAU)</objective>") || HAS_ITERATION_COMPLETE=0
 
     if [ "$HAS_ITERATION_COMPLETE" -eq 0 ]; then
-      echo ""
       echo "  ⚠ ITERATION BOUNDARY MISSING"
-      echo "  Agent did not output <iteration>COMPLETE</iteration> or termination signal."
-      echo "  This iteration may not have properly completed its experiment cycle."
+      echo "    Agent did not output <iteration>COMPLETE</iteration> or termination signal."
       log_verbose "Missing iteration boundary signal"
-
-      # Don't fail the iteration, but warn - the agent might have been interrupted
-      # or might have output metrics without the completion signal
     else
-      log_verbose "Iteration boundary signal found"
+      echo "  ✓ Iteration boundary signal found"
     fi
 
-    log_verbose "Processing objective mode metrics..."
+    # Check for metrics block
+    HAS_METRICS_BLOCK=$(echo "$OUTPUT" | grep -c "<metrics>") || HAS_METRICS_BLOCK=0
+    echo "  Has <metrics> block: $HAS_METRICS_BLOCK"
+
+    echo "  Extracting metrics..."
     EXTRACTED_METRICS=$(extract_metrics "$OUTPUT")
-    if [ -n "$EXTRACTED_METRICS" ]; then
-      echo "  Extracted metrics: $EXTRACTED_METRICS"
-      log_verbose "Metrics extracted successfully: $EXTRACTED_METRICS"
+    if [ -n "$EXTRACTED_METRICS" ] && [ "$EXTRACTED_METRICS" != "{}" ]; then
+      echo "  ✓ Extracted metrics from output: $EXTRACTED_METRICS"
     else
-      log_verbose "No metrics extracted from output"
-      if [ "$VERBOSE" = true ]; then
-        echo "  ⚠ No <metrics> block found - checking output for metrics pattern..."
-        if echo "$OUTPUT" | grep -q "accuracy\|precision\|recall"; then
-          echo "  Hint: Output contains metric keywords but no <metrics> block"
-          echo "  Agent may have forgotten to wrap metrics in <metrics>...</metrics> tags"
+      echo "  ⚠ No metrics in output - trying to extract from progress.txt..."
+
+      # Fallback: extract metrics from progress.txt
+      EXTRACTED_METRICS="{}"
+      if [ -f "$PROGRESS_FILE" ]; then
+        METRICS_TO_TRACK=$(jq -r '.verification.metricsToTrack // [] | .[]' "$CONFIG_FILE" 2>/dev/null)
+        for metric in $METRICS_TO_TRACK; do
+          # Pattern: "metric_name: X → Y" - extract Y (the after value)
+          METRIC_VALUE=$(tail -150 "$PROGRESS_FILE" | grep -oE "${metric}[^0-9]*[0-9]+\.[0-9]+ *→ *[0-9]+\.[0-9]+" | tail -1 | grep -oE '[0-9]+\.[0-9]+$' || echo "")
+          if [ -z "$METRIC_VALUE" ]; then
+            # Try pattern without arrow: "metric_name: Y" or "metric_name=Y"
+            METRIC_VALUE=$(tail -150 "$PROGRESS_FILE" | grep -oE "${metric}[^0-9]*[0-9]+\.[0-9]+" | tail -1 | grep -oE '[0-9]+\.[0-9]+' || echo "")
+          fi
+          if [ -n "$METRIC_VALUE" ]; then
+            EXTRACTED_METRICS=$(echo "$EXTRACTED_METRICS" | jq --arg k "$metric" --argjson v "$METRIC_VALUE" '. + {($k): $v}')
+            echo "    Found $metric: $METRIC_VALUE in progress.txt"
+          fi
+        done
+      fi
+
+      if [ "$EXTRACTED_METRICS" != "{}" ]; then
+        echo "  ✓ Extracted metrics from progress.txt: $EXTRACTED_METRICS"
+      else
+        echo "  ⚠ Could not extract metrics from progress.txt either"
+        # Show last 500 chars of output for debugging
+        if [ ${#OUTPUT} -gt 0 ]; then
+          echo "  Output tail (last 500 chars):"
+          echo "$OUTPUT" | tail -c 500 | sed 's/^/    /'
         fi
       fi
     fi
-    update_objective_metrics "$i" "$EXTRACTED_METRICS"
+
+    echo "  Updating objective.json..."
+    if update_objective_metrics "$i" "$EXTRACTED_METRICS"; then
+      echo "  ✓ objective.json updated"
+    else
+      echo "  ✗ Failed to update objective.json"
+    fi
 
     # Check for SUCCESS termination signal
     if check_objective_success "$OUTPUT"; then
