@@ -1352,16 +1352,25 @@ DYNAMIC_HEADER
     # NOTE: --print mode has issues with very long sessions (>30min) where
     # "No messages returned" error occurs. Using --output-format json as fallback.
     if [ "$LIVE_OUTPUT" = true ]; then
-      # Live mode: stream output to terminal while capturing to file using tee
+      # Live mode: run Claude interactively (no --print) so output streams in real-time
+      # Use 'script' to capture terminal output for later processing
+      #
+      # NOTE: Without --print, Claude runs interactively showing progress.
+      # We use 'script' to capture the terminal output for later processing.
+      # The captured output will include ANSI codes and spinner artifacts.
       echo ""
       echo "───────────────────────────────────────────────────────"
       echo "  LIVE OUTPUT (Claude is working...)"
+      echo "  Press Ctrl+C to interrupt"
       echo "───────────────────────────────────────────────────────"
+
+      # Run Claude interactively with script capturing output
+      # -q = quiet, -e = return exit code, -c = command
       if [ -n "$TIMEOUT_CMD" ]; then
-        $TIMEOUT_CMD claude --dangerously-skip-permissions --print --output-format text < "$EFFECTIVE_PROMPT_FILE" 2> "$STDERR_FILE" | tee "$STDOUT_FILE" &
+        $TIMEOUT_CMD script -q -e -c "cat '$EFFECTIVE_PROMPT_FILE' | claude --dangerously-skip-permissions" "$STDOUT_FILE" 2> "$STDERR_FILE" &
         CLAUDE_PID=$!
       else
-        claude --dangerously-skip-permissions --print --output-format text < "$EFFECTIVE_PROMPT_FILE" 2> "$STDERR_FILE" | tee "$STDOUT_FILE" &
+        script -q -e -c "cat '$EFFECTIVE_PROMPT_FILE' | claude --dangerously-skip-permissions" "$STDOUT_FILE" 2> "$STDERR_FILE" &
         CLAUDE_PID=$!
       fi
     else
@@ -1389,7 +1398,12 @@ DYNAMIC_HEADER
     fi
 
     # Read captured output from files
-    OUTPUT=$(cat "$STDOUT_FILE" 2>/dev/null || echo "")
+    if [ "$LIVE_OUTPUT" = true ]; then
+      # Strip ANSI escape codes from script output (interactive mode includes terminal formatting)
+      OUTPUT=$(cat "$STDOUT_FILE" 2>/dev/null | sed 's/\x1b\[[0-9;]*[a-zA-Z]//g' | tr -d '\r' || echo "")
+    else
+      OUTPUT=$(cat "$STDOUT_FILE" 2>/dev/null || echo "")
+    fi
     STDERR_CONTENT=$(cat "$STDERR_FILE" 2>/dev/null || echo "")
 
     # Also write to transcript file
