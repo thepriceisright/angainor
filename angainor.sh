@@ -1355,16 +1355,32 @@ DYNAMIC_HEADER
     STDERR_FILE=$(mktemp)
     STDOUT_FILE=$(mktemp)
 
-    # Debug: Test if Claude CLI is responsive with a simple command first
-    if [ "$VERBOSE" = true ] && [ "$retry" -eq 1 ]; then
-      log_verbose "Pre-flight check: Testing Claude CLI responsiveness..."
-      PREFLIGHT_OUTPUT=$(echo "respond with OK" | timeout 30 claude --print 2>&1 || echo "PREFLIGHT_FAILED")
-      if [[ "$PREFLIGHT_OUTPUT" == *"PREFLIGHT_FAILED"* ]] || [ -z "$PREFLIGHT_OUTPUT" ]; then
-        log_error "Pre-flight check FAILED - Claude CLI may not be responding"
-        echo "  ⚠ Pre-flight check: Claude CLI not responding to simple prompt"
+    echo "  [DEBUG] Temp files: stdout=$STDOUT_FILE, stderr=$STDERR_FILE"
+    echo "  [DEBUG] Prompt file: $EFFECTIVE_PROMPT_FILE ($(wc -c < "$EFFECTIVE_PROMPT_FILE" 2>/dev/null | tr -d ' ' || echo 'N/A') bytes)"
+
+    # Debug: Test if Claude CLI output capture works with same flags (first attempt only)
+    if [ "$retry" -eq 1 ]; then
+      echo "  [DEBUG] Pre-flight: Testing output capture mechanism..."
+      TEST_STDOUT=$(mktemp)
+      TEST_STDERR=$(mktemp)
+      echo "respond with OK only" | timeout 30 claude --dangerously-skip-permissions --print --output-format text > "$TEST_STDOUT" 2> "$TEST_STDERR" || true
+      sync 2>/dev/null || true
+      sleep 0.3
+      TEST_OUT_SIZE=$(wc -c < "$TEST_STDOUT" 2>/dev/null | tr -d ' ' || echo "0")
+      TEST_ERR_SIZE=$(wc -c < "$TEST_STDERR" 2>/dev/null | tr -d ' ' || echo "0")
+      echo "  [DEBUG] Pre-flight result: stdout=$TEST_OUT_SIZE bytes, stderr=$TEST_ERR_SIZE bytes"
+      if [ "$TEST_OUT_SIZE" -eq 0 ] && [ "$TEST_ERR_SIZE" -eq 0 ]; then
+        echo "  ⚠ Pre-flight: Output capture returned 0 bytes - may have capture issues"
+        # Try alternative capture to diagnose
+        ALT_OUT=$(echo "respond with OK" | timeout 30 claude --print 2>&1 || echo "")
+        echo "  [DEBUG] Alternative (2>&1): ${#ALT_OUT} chars"
+        if [ ${#ALT_OUT} -gt 0 ]; then
+          echo "  [DEBUG] Alternative works - issue is with file redirection"
+        fi
       else
-        log_verbose "Pre-flight check: OK (Claude CLI responsive)"
+        echo "  [DEBUG] Pre-flight: Output capture working"
       fi
+      rm -f "$TEST_STDOUT" "$TEST_STDERR"
     fi
 
     # Run Claude and capture output to files for reliable capture
@@ -1400,11 +1416,26 @@ DYNAMIC_HEADER
       fi
     else
       # Normal mode: capture to file only (no terminal output)
+      # Use stdbuf to disable output buffering if available (helps with capture issues)
+      UNBUF_CMD=""
+      if command -v stdbuf &> /dev/null; then
+        UNBUF_CMD="stdbuf -oL -eL"
+        log_verbose "Using stdbuf for unbuffered output"
+      fi
+
       if [ -n "$TIMEOUT_CMD" ]; then
-        $TIMEOUT_CMD claude --dangerously-skip-permissions --print --output-format text < "$EFFECTIVE_PROMPT_FILE" > "$STDOUT_FILE" 2> "$STDERR_FILE" &
+        if [ -n "$UNBUF_CMD" ]; then
+          $TIMEOUT_CMD $UNBUF_CMD claude --dangerously-skip-permissions --print --output-format text < "$EFFECTIVE_PROMPT_FILE" > "$STDOUT_FILE" 2> "$STDERR_FILE" &
+        else
+          $TIMEOUT_CMD claude --dangerously-skip-permissions --print --output-format text < "$EFFECTIVE_PROMPT_FILE" > "$STDOUT_FILE" 2> "$STDERR_FILE" &
+        fi
         CLAUDE_PID=$!
       else
-        claude --dangerously-skip-permissions --print --output-format text < "$EFFECTIVE_PROMPT_FILE" > "$STDOUT_FILE" 2> "$STDERR_FILE" &
+        if [ -n "$UNBUF_CMD" ]; then
+          $UNBUF_CMD claude --dangerously-skip-permissions --print --output-format text < "$EFFECTIVE_PROMPT_FILE" > "$STDOUT_FILE" 2> "$STDERR_FILE" &
+        else
+          claude --dangerously-skip-permissions --print --output-format text < "$EFFECTIVE_PROMPT_FILE" > "$STDOUT_FILE" 2> "$STDERR_FILE" &
+        fi
         CLAUDE_PID=$!
       fi
     fi
@@ -1461,6 +1492,11 @@ DYNAMIC_HEADER
     echo "  [DEBUG] Claude process completed with exit code: $CLAUDE_EXIT_CODE"
     CLAUDE_PID=""  # Clear PID after completion
 
+    # Ensure filesystem buffers are flushed before reading output files
+    # This prevents race conditions where wait() returns but buffers aren't written
+    sync 2>/dev/null || true
+    sleep 0.5  # Brief pause to ensure file writes complete
+
     # Show end of live output
     if [ "$LIVE_OUTPUT" = true ]; then
       echo ""
@@ -1471,6 +1507,14 @@ DYNAMIC_HEADER
 
     # Read captured output from files
     echo "  [DEBUG] Reading captured output..."
+
+    # Debug: Check file existence and size before reading
+    if [ -f "$STDOUT_FILE" ]; then
+      STDOUT_SIZE_PRE=$(wc -c < "$STDOUT_FILE" 2>/dev/null | tr -d ' ' || echo "0")
+      echo "  [DEBUG] STDOUT file exists, size before read: $STDOUT_SIZE_PRE bytes"
+    else
+      echo "  [DEBUG] WARNING: STDOUT file does not exist: $STDOUT_FILE"
+    fi
     if [ "$LIVE_OUTPUT" = true ]; then
       # Strip ANSI escape codes from script output (interactive mode includes terminal formatting)
       OUTPUT=$(cat "$STDOUT_FILE" 2>/dev/null | sed 's/\x1b\[[0-9;]*[a-zA-Z]//g' | tr -d '\r' || echo "")
@@ -1479,6 +1523,16 @@ DYNAMIC_HEADER
     fi
     STDERR_CONTENT=$(cat "$STDERR_FILE" 2>/dev/null || echo "")
     echo "  [DEBUG] Output captured: ${#OUTPUT} chars, stderr: ${#STDERR_CONTENT} chars"
+
+    # If stdout is empty but stderr has content, Claude may have output there
+    if [ ${#OUTPUT} -eq 0 ] && [ ${#STDERR_CONTENT} -gt 100 ]; then
+      echo "  [DEBUG] Stdout empty but stderr has content - checking if it's valid output..."
+      # Check if stderr contains iteration markers (output went to wrong stream)
+      if echo "$STDERR_CONTENT" | grep -q -E '<metrics>|<iteration>|<objective>'; then
+        echo "  [DEBUG] Found output markers in stderr, using stderr as output"
+        OUTPUT="$STDERR_CONTENT"
+      fi
+    fi
 
     # Also write to transcript file
     cat "$STDOUT_FILE" > "$TRANSCRIPT_FILE" 2>/dev/null || true
