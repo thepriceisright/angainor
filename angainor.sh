@@ -1576,48 +1576,52 @@ DYNAMIC_HEADER
       if [ "$MODE" = "objective" ]; then
         echo "  Checking if work was done despite missing output..."
 
-        # IMPORTANT: Wait for any work processes to complete before checking git evidence
-        # Claude may have spawned long-running processes (vl-takeoff, benchmarks, etc.)
-        # that are still doing work even though Claude's --print mode returned empty.
+        # IMPORTANT: Wait for work to complete before checking git evidence
+        # Claude may have spawned long-running processes that are still doing work
+        # even though Claude's --print mode returned empty.
         #
-        # Look for processes started after ITERATION_START that might be doing work
-        # Common patterns: vl-takeoff, python benchmark scripts, npm/node processes
-        echo "  Checking for running work processes..."
-        ITERATION_AGE=$(($(date +%s) - ITERATION_START))
-        # Find processes younger than the iteration (started after iteration began)
-        # etimes = elapsed time in seconds, so etimes < ITERATION_AGE means started after
-        WORK_PROCS=$(ps -eo pid,etimes,comm 2>/dev/null | awk -v age="$ITERATION_AGE" '$2 < age && ($3 ~ /vl-takeoff|python|benchmark/)' | awk '{print $1}' || true)
+        # Strategy: Poll for git activity. If new commits appear or files change,
+        # work is still happening. Wait until activity stops or timeout.
+        echo "  Monitoring for ongoing work (checking git activity)..."
 
-        if [ -n "$WORK_PROCS" ]; then
-          echo "  Found work processes still running, waiting for completion..."
-          WAIT_TIMEOUT=1800  # 30 minutes max
-          WAIT_START=$(date +%s)
+        ACTIVITY_TIMEOUT=1800  # 30 minutes max total wait
+        IDLE_THRESHOLD=60      # Consider work done after 60s of no changes
+        POLL_INTERVAL=10
 
-          while [ -n "$WORK_PROCS" ]; do
-            sleep 10
-            WAIT_ELAPSED=$(($(date +%s) - WAIT_START))
+        ACTIVITY_START=$(date +%s)
+        LAST_ACTIVITY=$(date +%s)
+        LAST_COMMIT_COUNT=$(git rev-list --count HEAD 2>/dev/null || echo "0")
+        LAST_PROGRESS_HASH=$(md5sum "$PROGRESS_FILE" 2>/dev/null | cut -d' ' -f1 || echo "none")
 
-            if [ $WAIT_ELAPSED -ge $WAIT_TIMEOUT ]; then
-              echo "  ⚠ Timeout waiting for work processes after ${WAIT_TIMEOUT}s"
-              echo "  Still running: $WORK_PROCS"
-              break
-            fi
+        while true; do
+          sleep $POLL_INTERVAL
+          NOW=$(date +%s)
+          ELAPSED=$((NOW - ACTIVITY_START))
 
-            # Check if any are still running
-            STILL_RUNNING=""
-            for pid in $WORK_PROCS; do
-              if kill -0 "$pid" 2>/dev/null; then
-                STILL_RUNNING="$STILL_RUNNING $pid"
-              fi
-            done
-            WORK_PROCS=$(echo "$STILL_RUNNING" | xargs)
+          # Check for timeout
+          if [ $ELAPSED -ge $ACTIVITY_TIMEOUT ]; then
+            echo "  ⚠ Activity monitoring timeout after ${ACTIVITY_TIMEOUT}s"
+            break
+          fi
 
-            if [ -n "$WORK_PROCS" ]; then
-              echo "    Still waiting for: $WORK_PROCS (${WAIT_ELAPSED}s elapsed)"
-            fi
-          done
-          echo "  Work processes completed."
-        fi
+          # Check for new commits
+          CURRENT_COMMIT_COUNT=$(git rev-list --count HEAD 2>/dev/null || echo "0")
+          CURRENT_PROGRESS_HASH=$(md5sum "$PROGRESS_FILE" 2>/dev/null | cut -d' ' -f1 || echo "none")
+
+          if [ "$CURRENT_COMMIT_COUNT" != "$LAST_COMMIT_COUNT" ] || [ "$CURRENT_PROGRESS_HASH" != "$LAST_PROGRESS_HASH" ]; then
+            echo "    Activity detected at ${ELAPSED}s (commits: $LAST_COMMIT_COUNT→$CURRENT_COMMIT_COUNT)"
+            LAST_ACTIVITY=$NOW
+            LAST_COMMIT_COUNT="$CURRENT_COMMIT_COUNT"
+            LAST_PROGRESS_HASH="$CURRENT_PROGRESS_HASH"
+          fi
+
+          # Check if idle long enough
+          IDLE_TIME=$((NOW - LAST_ACTIVITY))
+          if [ $IDLE_TIME -ge $IDLE_THRESHOLD ]; then
+            echo "  No activity for ${IDLE_TIME}s, assuming work complete."
+            break
+          fi
+        done
 
         # Check for git commits made during this iteration
         RECENT_COMMITS=$(git log --oneline --since="$ITERATION_START_TIME" 2>/dev/null | head -5)
