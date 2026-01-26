@@ -154,6 +154,31 @@ Each objective iteration MUST end with `<iteration>COMPLETE</iteration>` (or a t
 - `<iteration>COMPLETE</iteration>` - Normal iteration end
 - `<objective>SUCCESS|IMPOSSIBLE|PLATEAU</objective>` - Terminal states
 
+### Plateau-Breaking Protocol (Objective Mode)
+When iterations show diminishing returns, the Plateau-Breaking Protocol forces approach diversity:
+
+**Escalation Levels:**
+| Level | Trigger | Required Behavior |
+|-------|---------|-------------------|
+| EXPLORE | Normal state | Standard hypothesis formation |
+| PIVOT | 2+ iterations without significant improvement | Must try different approach category |
+| REFRAME | 4+ iterations stalled | Must challenge assumptions or problem framing |
+
+**Approach Categories** (every hypothesis must belong to one):
+- `PARAMETER_TUNING` - Adjust thresholds, hyperparameters, config values
+- `ALGORITHM_CHANGE` - Swap one method for a different one
+- `DATA_PIPELINE` - Change how input is processed, filtered, augmented
+- `ARCHITECTURE` - Structural changes to system design
+- `ERROR_ANALYSIS` - Deep-dive into failure cases to find root causes
+- `ASSUMPTION_CHALLENGE` - Question whether the problem is framed correctly
+
+**Key rules:**
+- In PIVOT/REFRAME: must select approach category NOT used in last 2 iterations
+- Each iteration logs its approach category to progress.txt for category rotation
+- Before signaling PLATEAU: must have tried at least 3 different categories
+
+See `objective-prompt.md` for the full protocol with XML output formats.
+
 ### Angainor Profile
 angainor.sh configures a minimal plugin environment for autonomous runs:
 
