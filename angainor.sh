@@ -1576,6 +1576,49 @@ DYNAMIC_HEADER
       if [ "$MODE" = "objective" ]; then
         echo "  Checking if work was done despite missing output..."
 
+        # IMPORTANT: Wait for any work processes to complete before checking git evidence
+        # Claude may have spawned long-running processes (vl-takeoff, benchmarks, etc.)
+        # that are still doing work even though Claude's --print mode returned empty.
+        #
+        # Look for processes started after ITERATION_START that might be doing work
+        # Common patterns: vl-takeoff, python benchmark scripts, npm/node processes
+        echo "  Checking for running work processes..."
+        ITERATION_AGE=$(($(date +%s) - ITERATION_START))
+        # Find processes younger than the iteration (started after iteration began)
+        # etimes = elapsed time in seconds, so etimes < ITERATION_AGE means started after
+        WORK_PROCS=$(ps -eo pid,etimes,comm 2>/dev/null | awk -v age="$ITERATION_AGE" '$2 < age && ($3 ~ /vl-takeoff|python|benchmark/)' | awk '{print $1}' || true)
+
+        if [ -n "$WORK_PROCS" ]; then
+          echo "  Found work processes still running, waiting for completion..."
+          WAIT_TIMEOUT=1800  # 30 minutes max
+          WAIT_START=$(date +%s)
+
+          while [ -n "$WORK_PROCS" ]; do
+            sleep 10
+            WAIT_ELAPSED=$(($(date +%s) - WAIT_START))
+
+            if [ $WAIT_ELAPSED -ge $WAIT_TIMEOUT ]; then
+              echo "  ⚠ Timeout waiting for work processes after ${WAIT_TIMEOUT}s"
+              echo "  Still running: $WORK_PROCS"
+              break
+            fi
+
+            # Check if any are still running
+            STILL_RUNNING=""
+            for pid in $WORK_PROCS; do
+              if kill -0 "$pid" 2>/dev/null; then
+                STILL_RUNNING="$STILL_RUNNING $pid"
+              fi
+            done
+            WORK_PROCS=$(echo "$STILL_RUNNING" | xargs)
+
+            if [ -n "$WORK_PROCS" ]; then
+              echo "    Still waiting for: $WORK_PROCS (${WAIT_ELAPSED}s elapsed)"
+            fi
+          done
+          echo "  Work processes completed."
+        fi
+
         # Check for git commits made during this iteration
         RECENT_COMMITS=$(git log --oneline --since="$ITERATION_START_TIME" 2>/dev/null | head -5)
 
