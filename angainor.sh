@@ -56,6 +56,13 @@ while [[ $# -gt 0 ]]; do
     --live)
       # Show Claude output in real-time (stream to terminal while capturing)
       LIVE_OUTPUT=true
+      LIVE_OUTPUT_EXPLICIT=true
+      shift
+      ;;
+    --no-live)
+      # Force non-live mode (use --print, override objective mode default)
+      LIVE_OUTPUT=false
+      LIVE_OUTPUT_EXPLICIT=true
       shift
       ;;
     --help|-h)
@@ -66,7 +73,8 @@ while [[ $# -gt 0 ]]; do
       echo "  --objective       Run in Objective mode"
       echo "  --timeout=SECS    Set iteration timeout (default: 1800s objective, 600s PRD)"
       echo "  --no-timeout      Disable iteration timeout entirely"
-      echo "  --live            Stream Claude output in real-time (follow along as it works)"
+      echo "  --live            Stream Claude output in real-time (default for objective mode)"
+      echo "  --no-live         Force non-streaming mode (use --print, may timeout on long tasks)"
       echo "  --verbose, -v     Enable verbose output for debugging"
       echo "  --debug           Enable debug logging to angainor-debug.log"
       echo "  --debug=FILE      Enable debug logging to specific file"
@@ -133,6 +141,13 @@ if [ "$MODE" = "objective" ]; then
   CONFIG_FILE="$SCRIPT_DIR/objective.json"
   PROMPT_FILE="$SCRIPT_DIR/objective-prompt.md"
   MODE_DISPLAY="OBJECTIVE"
+  # Objective mode defaults to live output because --print mode buffers ALL output
+  # until Claude completes, which doesn't work for long-running benchmarks.
+  # Users can override with --no-live if they really want --print mode.
+  if [ "$LIVE_OUTPUT_EXPLICIT" != true ] && [ "$LIVE_OUTPUT" = false ]; then
+    LIVE_OUTPUT=true
+    LIVE_OUTPUT_AUTO=true  # Track that this was auto-enabled
+  fi
 else
   CONFIG_FILE="$SCRIPT_DIR/prd.json"
   PROMPT_FILE="$SCRIPT_DIR/prompt.md"
@@ -1144,7 +1159,11 @@ fi
 
 echo "Starting Angainor in $MODE_DISPLAY mode - Max iterations: $MAX_ITERATIONS"
 if [ "$LIVE_OUTPUT" = true ]; then
-  echo "Live output: ENABLED (Claude output will stream to terminal)"
+  if [ "$LIVE_OUTPUT_AUTO" = true ]; then
+    echo "Live output: ENABLED (auto-enabled for objective mode - --print buffers too long)"
+  else
+    echo "Live output: ENABLED (Claude output will stream to terminal)"
+  fi
 fi
 if [ "$VERBOSE" = true ]; then
   echo "Verbose mode: ENABLED"
