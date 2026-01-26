@@ -622,10 +622,11 @@ print_objective_summary() {
 }
 
 # Check for SUCCESS termination in Objective mode
-# Arguments: output_text
+# Arguments: output_text, metrics_json (optional - for validation)
 # Returns: 0 if SUCCESS found (and state updated), 1 otherwise
 check_objective_success() {
   local output="$1"
+  local metrics="${2:-}"
 
   # Only run in objective mode
   if [ "$MODE" != "objective" ]; then
@@ -635,6 +636,15 @@ check_objective_success() {
   # Check for <objective>SUCCESS</objective> signal
   if ! echo "$output" | grep -qE "^[[:space:]]*<objective>SUCCESS</objective>[[:space:]]*$"; then
     return 1
+  fi
+
+  # Warn if SUCCESS is signaled without metrics
+  if [ -z "$metrics" ] || [ "$metrics" = "{}" ] || [ "$metrics" = "null" ]; then
+    echo ""
+    echo "  ⚠ WARNING: SUCCESS signaled without valid metrics!"
+    echo "    This may indicate Claude didn't run the benchmark or output was corrupted."
+    echo "    Check the transcript file for details."
+    echo ""
   fi
 
   # Update objective.json status to 'success'
@@ -1554,8 +1564,20 @@ DYNAMIC_HEADER
       echo "  [DEBUG] WARNING: STDOUT file does not exist: $STDOUT_FILE"
     fi
     if [ "$LIVE_OUTPUT" = true ]; then
-      # Strip ANSI escape codes from script output (interactive mode includes terminal formatting)
-      OUTPUT=$(cat "$STDOUT_FILE" 2>/dev/null | sed 's/\x1b\[[0-9;]*[a-zA-Z]//g' | tr -d '\r' || echo "")
+      # Strip terminal artifacts from script output (interactive mode includes lots of formatting)
+      # This includes:
+      # - ANSI CSI sequences: \x1b[...m (colors), \x1b[...H (cursor), etc.
+      # - ANSI OSC sequences: \x1b]...  (window titles, etc.)
+      # - Other escape sequences: \x1b(B, \x1b>, etc.
+      # - Control characters: backspace, carriage return, bells
+      # - Spinner artifacts that get overwritten
+      OUTPUT=$(cat "$STDOUT_FILE" 2>/dev/null | \
+        sed 's/\x1b\[[0-9;]*[a-zA-Z]//g' | \
+        sed 's/\x1b\][^\x07]*\x07//g' | \
+        sed 's/\x1b[()][AB012]//g' | \
+        sed 's/\x1b[>=]//g' | \
+        tr -d '\r\x07\x08' | \
+        sed 's/.*\r//g' || echo "")
     else
       OUTPUT=$(cat "$STDOUT_FILE" 2>/dev/null || echo "")
     fi
@@ -1958,6 +1980,18 @@ EOF
     echo "  [Objective Mode Processing]"
     echo "  Output length: ${#OUTPUT} chars"
 
+    # Debug: Show first and last parts of output to help diagnose issues
+    if [ ${#OUTPUT} -gt 0 ]; then
+      echo "  [DEBUG] First 200 chars of output:"
+      echo "$OUTPUT" | head -c 200 | sed 's/^/    /'
+      echo ""
+      echo "  [DEBUG] Last 500 chars of output:"
+      echo "$OUTPUT" | tail -c 500 | sed 's/^/    /'
+      echo ""
+    else
+      echo "  [DEBUG] Output is empty!"
+    fi
+
     # Check for iteration completion signal (required to properly bound iterations)
     # Accept multiple formats:
     #   - <iteration>COMPLETE</iteration> (preferred XML format)
@@ -2022,7 +2056,7 @@ EOF
     fi
 
     # Check for SUCCESS termination signal
-    if check_objective_success "$OUTPUT"; then
+    if check_objective_success "$OUTPUT" "$EXTRACTED_METRICS"; then
       record_metrics "success" "OBJECTIVE_SUCCESS" ""
       print_metrics_summary
       exit 0
