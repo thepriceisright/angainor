@@ -66,14 +66,14 @@ cd flowchart && npm run lint                  # lint check
 | `--verbose`, `-v` | Show detailed info during API calls (response lengths, exit codes, stderr) |
 | `--debug` | Write full debug log to `angainor-debug.log` (implies verbose) |
 | `--debug=FILE` | Write debug log to custom path |
-| `--timeout=SECS` | Set iteration timeout (default: 1800s objective, 600s PRD) |
+| `--timeout=SECS` | Set iteration timeout (default: 3600s/60min objective, 600s PRD) |
 | `--no-timeout` | Disable iteration timeout entirely |
 
 **When to use:**
 - **Empty responses**: Use `--verbose` to see what Claude is returning
 - **API errors**: Use `--verbose` to see the actual error patterns matched
 - **Full diagnosis**: Use `--debug` to capture everything for later analysis
-- **Long-running benchmarks**: Use `--timeout=3600` or `--no-timeout` for iterations that run ML inference
+- **Very long benchmarks**: Use `--timeout=7200` or `--no-timeout` for iterations over 60min
 
 ## Repository Structure
 
