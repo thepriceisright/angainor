@@ -1393,7 +1393,7 @@ DYNAMIC_HEADER
   # Objective mode gets longer default (30 min) since it often runs benchmarks
   if [ -z "$CLAUDE_TIMEOUT" ]; then
     if [ "$MODE" = "objective" ]; then
-      ITERATION_TIMEOUT=1800  # 30 minutes for objective mode
+      ITERATION_TIMEOUT=3600  # 60 minutes for objective mode (ML benchmarks often take 30-60 min)
     else
       ITERATION_TIMEOUT=600   # 10 minutes for PRD mode
     fi
@@ -1626,13 +1626,23 @@ DYNAMIC_HEADER
       # - Other escape sequences: \x1b(B, \x1b>, etc.
       # - Control characters: backspace, carriage return, bells
       # - Spinner artifacts that get overwritten
+      #
+      # IMPORTANT: Cursor movement codes carry semantic meaning in Claude's output:
+      # - Cursor-right (\x1b[1C, \x1b[2C) = SPACE between words
+      # - Cursor-down (\x1b[1B, \x1b[2B) = NEWLINE
+      # We must convert these to the appropriate characters, not just delete them.
+      # Example: "I'll\x1b[1Cstart\x1b[1Bnext" should become "I'll start\nnext"
       OUTPUT=$(cat "$STDOUT_FILE" 2>/dev/null | \
-        sed 's/\x1b\[[0-9;]*[a-zA-Z]//g' | \
+        sed 's/\x1b\[[0-9]*C/ /g' | \
+        sed 's/\x1b\[[0-9]*B/\n/g' | \
+        sed 's/\x1b\[[0-9;]*[a-zA-DFGHJKSTfm]//g' | \
         sed 's/\x1b\][^\x07]*\x07//g' | \
         sed 's/\x1b[()][AB012]//g' | \
         sed 's/\x1b[>=]//g' | \
         tr -d '\r\x07\x08' | \
-        sed 's/.*\r//g' || echo "")
+        sed 's/.*\r//g' | \
+        tr -s ' ' | \
+        sed '/^[[:space:]]*$/d' || echo "")
     else
       OUTPUT=$(cat "$STDOUT_FILE" 2>/dev/null || echo "")
     fi
