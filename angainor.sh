@@ -1215,10 +1215,31 @@ if [ "$VERBOSE" = true ]; then
   echo ""
 fi
 
-for i in $(seq 1 $MAX_ITERATIONS); do
+# For objective mode, continue from where we left off (resume support)
+# For PRD mode, always start at 1
+START_ITERATION=1
+if [ "$MODE" = "objective" ] && [ -f "$CONFIG_FILE" ]; then
+  COMPLETED_ITERATIONS=$(jq -r '.status.iterations // 0' "$CONFIG_FILE")
+  if [ "$COMPLETED_ITERATIONS" -gt 0 ]; then
+    START_ITERATION=$((COMPLETED_ITERATIONS + 1))
+    echo "Resuming from iteration $START_ITERATION (found $COMPLETED_ITERATIONS completed in objective.json)"
+  fi
+fi
+
+# Calculate effective max (START + MAX_ITERATIONS - 1, capped by config if set)
+EFFECTIVE_MAX=$((START_ITERATION + MAX_ITERATIONS - 1))
+if [ "$MODE" = "objective" ] && [ -f "$CONFIG_FILE" ]; then
+  CONFIG_MAX=$(jq -r '.stopping.maxIterations // 0' "$CONFIG_FILE")
+  if [ "$CONFIG_MAX" -gt 0 ] && [ "$CONFIG_MAX" -lt "$EFFECTIVE_MAX" ]; then
+    EFFECTIVE_MAX="$CONFIG_MAX"
+    echo "Capped at iteration $EFFECTIVE_MAX (from objective.json stopping.maxIterations)"
+  fi
+fi
+
+for i in $(seq $START_ITERATION $EFFECTIVE_MAX); do
   echo ""
   echo "═══════════════════════════════════════════════════════"
-  echo "  Angainor Iteration $i of $MAX_ITERATIONS"
+  echo "  Angainor Iteration $i of $EFFECTIVE_MAX"
   echo "═══════════════════════════════════════════════════════"
 
   # Capture iteration start time for metrics and git checks
@@ -1923,7 +1944,11 @@ EOF
 done
 
 echo ""
-echo "Angainor reached max iterations ($MAX_ITERATIONS) without completing all tasks."
+echo "Angainor completed iterations $START_ITERATION to $EFFECTIVE_MAX."
+if [ "$MODE" = "objective" ]; then
+  FINAL_ITERATIONS=$(jq -r '.status.iterations // 0' "$CONFIG_FILE" 2>/dev/null)
+  echo "Total objective iterations completed: $FINAL_ITERATIONS"
+fi
 echo "Check $PROGRESS_FILE for status."
 print_metrics_summary
 exit 1
