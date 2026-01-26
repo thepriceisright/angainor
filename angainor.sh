@@ -1160,7 +1160,7 @@ fi
 echo "Starting Angainor in $MODE_DISPLAY mode - Max iterations: $MAX_ITERATIONS"
 if [ "$LIVE_OUTPUT" = true ]; then
   if [ "$LIVE_OUTPUT_AUTO" = true ]; then
-    echo "Live output: ENABLED (auto-enabled for objective mode - --print buffers too long)"
+    echo "Capture mode: script (auto - --print buffers too long for objective mode)"
   else
     echo "Live output: ENABLED (Claude output will stream to terminal)"
   fi
@@ -1417,21 +1417,40 @@ DYNAMIC_HEADER
       #
       # IMPORTANT: We must send /exit after the prompt to make Claude exit cleanly.
       # Otherwise it waits for more input and the script hangs.
-      echo ""
-      echo "───────────────────────────────────────────────────────"
-      echo "  LIVE OUTPUT (Claude is working...)"
-      echo "  Press Ctrl+C to interrupt"
-      echo "───────────────────────────────────────────────────────"
+
+      # Only show live output banner if explicitly requested (not auto-enabled)
+      if [ "$LIVE_OUTPUT_AUTO" != true ]; then
+        echo ""
+        echo "───────────────────────────────────────────────────────"
+        echo "  LIVE OUTPUT (Claude is working...)"
+        echo "  Press Ctrl+C to interrupt"
+        echo "───────────────────────────────────────────────────────"
+      fi
 
       # Run Claude interactively with script capturing output
       # -q = quiet, -e = return exit code, -c = command
       # We send /exit after the prompt to ensure Claude exits when done
-      if [ -n "$TIMEOUT_CMD" ]; then
-        $TIMEOUT_CMD script -q -e -c "(cat '$EFFECTIVE_PROMPT_FILE'; echo ''; echo '/exit') | claude --dangerously-skip-permissions" "$STDOUT_FILE" 2> "$STDERR_FILE" &
-        CLAUDE_PID=$!
+      #
+      # When auto-enabled (objective mode), suppress terminal output (> /dev/null)
+      # When explicitly requested (--live), show output on terminal
+      if [ "$LIVE_OUTPUT_AUTO" = true ]; then
+        # Silent capture mode: use script for pseudo-TTY but don't show output
+        if [ -n "$TIMEOUT_CMD" ]; then
+          $TIMEOUT_CMD script -q -e -c "(cat '$EFFECTIVE_PROMPT_FILE'; echo ''; echo '/exit') | claude --dangerously-skip-permissions" "$STDOUT_FILE" > /dev/null 2> "$STDERR_FILE" &
+          CLAUDE_PID=$!
+        else
+          script -q -e -c "(cat '$EFFECTIVE_PROMPT_FILE'; echo ''; echo '/exit') | claude --dangerously-skip-permissions" "$STDOUT_FILE" > /dev/null 2> "$STDERR_FILE" &
+          CLAUDE_PID=$!
+        fi
       else
-        script -q -e -c "(cat '$EFFECTIVE_PROMPT_FILE'; echo ''; echo '/exit') | claude --dangerously-skip-permissions" "$STDOUT_FILE" 2> "$STDERR_FILE" &
-        CLAUDE_PID=$!
+        # Interactive mode: show output on terminal while capturing
+        if [ -n "$TIMEOUT_CMD" ]; then
+          $TIMEOUT_CMD script -q -e -c "(cat '$EFFECTIVE_PROMPT_FILE'; echo ''; echo '/exit') | claude --dangerously-skip-permissions" "$STDOUT_FILE" 2> "$STDERR_FILE" &
+          CLAUDE_PID=$!
+        else
+          script -q -e -c "(cat '$EFFECTIVE_PROMPT_FILE'; echo ''; echo '/exit') | claude --dangerously-skip-permissions" "$STDOUT_FILE" 2> "$STDERR_FILE" &
+          CLAUDE_PID=$!
+        fi
       fi
     else
       # Normal mode: capture to file only (no terminal output)
@@ -1516,8 +1535,8 @@ DYNAMIC_HEADER
     sync 2>/dev/null || true
     sleep 0.5  # Brief pause to ensure file writes complete
 
-    # Show end of live output
-    if [ "$LIVE_OUTPUT" = true ]; then
+    # Show end of live output (only if explicitly requested, not auto-enabled)
+    if [ "$LIVE_OUTPUT" = true ] && [ "$LIVE_OUTPUT_AUTO" != true ]; then
       echo ""
       echo "───────────────────────────────────────────────────────"
       echo "  END LIVE OUTPUT"

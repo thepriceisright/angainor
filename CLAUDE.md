@@ -154,6 +154,18 @@ Each objective iteration MUST end with `<iteration>COMPLETE</iteration>` (or a t
 - `<iteration>COMPLETE</iteration>` - Normal iteration end
 - `<objective>SUCCESS|IMPOSSIBLE|PLATEAU</objective>` - Terminal states
 
+### Live Output (Objective Mode Default)
+Objective mode automatically enables `--live` output because:
+- Claude's `--print` mode buffers ALL output until the response completes
+- Objective mode often runs long benchmarks (10+ minutes)
+- Without live mode, empty response detection triggers before Claude finishes
+
+**Flags:**
+- `--live` - Enable streaming output (default for objective mode)
+- `--no-live` - Force `--print` mode (may timeout on long tasks)
+
+PRD mode still uses `--print` by default since tasks are typically faster.
+
 ### Plateau-Breaking Protocol (Objective Mode)
 When iterations show diminishing returns, the Plateau-Breaking Protocol forces approach diversity:
 
