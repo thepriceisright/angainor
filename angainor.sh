@@ -633,8 +633,15 @@ check_objective_success() {
     return 1
   fi
 
-  # Check for <objective>SUCCESS</objective> signal
-  if ! echo "$output" | grep -qE "^[[:space:]]*<objective>SUCCESS</objective>[[:space:]]*$"; then
+  # IMPORTANT: Only check the TAIL of output for termination signals.
+  # The prompt file (displayed at start in script mode) contains example SUCCESS tags
+  # that would falsely match. Claude's actual response is at the END.
+  # Use last 5000 chars which is enough for any reasonable response tail.
+  local output_tail
+  output_tail=$(echo "$output" | tail -c 5000)
+
+  # Check for <objective>SUCCESS</objective> signal in the tail only
+  if ! echo "$output_tail" | grep -qE "^[[:space:]]*<objective>SUCCESS</objective>[[:space:]]*$"; then
     return 1
   fi
 
@@ -702,21 +709,26 @@ check_objective_impossible() {
     return 1
   fi
 
-  # Check for <objective>IMPOSSIBLE</objective> signal
-  if ! echo "$output" | grep -qE "^[[:space:]]*<objective>IMPOSSIBLE</objective>[[:space:]]*$"; then
+  # IMPORTANT: Only check the TAIL of output for termination signals.
+  # The prompt file contains example tags that would falsely match.
+  local output_tail
+  output_tail=$(echo "$output" | tail -c 5000)
+
+  # Check for <objective>IMPOSSIBLE</objective> signal in the tail only
+  if ! echo "$output_tail" | grep -qE "^[[:space:]]*<objective>IMPOSSIBLE</objective>[[:space:]]*$"; then
     return 1
   fi
 
-  # Extract reason from <reason>...</reason> block
+  # Extract reason from <reason>...</reason> block (use tail)
   local reason=""
-  if echo "$output" | grep -q "<reason>"; then
-    reason=$(echo "$output" | sed -n '/<reason>/,/<\/reason>/p' | sed '1d;$d' | tr '\n' ' ' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+  if echo "$output_tail" | grep -q "<reason>"; then
+    reason=$(echo "$output_tail" | sed -n '/<reason>/,/<\/reason>/p' | sed '1d;$d' | tr '\n' ' ' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
   fi
 
-  # Extract category from <category>...</category> block (technical|scope|resource)
+  # Extract category from <category>...</category> block (use tail)
   local category=""
-  if echo "$output" | grep -q "<category>"; then
-    category=$(echo "$output" | sed -n '/<category>/,/<\/category>/p' | sed '1d;$d' | tr -d '\n' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+  if echo "$output_tail" | grep -q "<category>"; then
+    category=$(echo "$output_tail" | sed -n '/<category>/,/<\/category>/p' | sed '1d;$d' | tr -d '\n' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
   fi
 
   # Update objective.json status to 'impossible' and store reason
@@ -746,21 +758,26 @@ check_objective_plateau() {
     return 1
   fi
 
-  # Check for <objective>PLATEAU</objective> signal
-  if ! echo "$output" | grep -qE "^[[:space:]]*<objective>PLATEAU</objective>[[:space:]]*$"; then
+  # IMPORTANT: Only check the TAIL of output for termination signals.
+  # The prompt file contains example tags that would falsely match.
+  local output_tail
+  output_tail=$(echo "$output" | tail -c 5000)
+
+  # Check for <objective>PLATEAU</objective> signal in the tail only
+  if ! echo "$output_tail" | grep -qE "^[[:space:]]*<objective>PLATEAU</objective>[[:space:]]*$"; then
     return 1
   fi
 
-  # Extract attempts from <attempts>...</attempts> block
+  # Extract attempts from <attempts>...</attempts> block (use tail)
   local attempts=""
-  if echo "$output" | grep -q "<attempts>"; then
-    attempts=$(echo "$output" | sed -n '/<attempts>/,/<\/attempts>/p' | sed '1d;$d' | tr '\n' ' ' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+  if echo "$output_tail" | grep -q "<attempts>"; then
+    attempts=$(echo "$output_tail" | sed -n '/<attempts>/,/<\/attempts>/p' | sed '1d;$d' | tr '\n' ' ' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
   fi
 
-  # Extract suggestion from <suggestion>...</suggestion> block
+  # Extract suggestion from <suggestion>...</suggestion> block (use tail)
   local suggestion=""
-  if echo "$output" | grep -q "<suggestion>"; then
-    suggestion=$(echo "$output" | sed -n '/<suggestion>/,/<\/suggestion>/p' | sed '1d;$d' | tr '\n' ' ' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+  if echo "$output_tail" | grep -q "<suggestion>"; then
+    suggestion=$(echo "$output_tail" | sed -n '/<suggestion>/,/<\/suggestion>/p' | sed '1d;$d' | tr '\n' ' ' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
   fi
 
   # Update objective.json status to 'plateau'
@@ -785,8 +802,13 @@ check_objective_max_iterations() {
     return 1
   fi
 
-  # Check for <objective>MAX_ITERATIONS</objective> signal
-  if ! echo "$output" | grep -qE "^[[:space:]]*<objective>MAX_ITERATIONS</objective>[[:space:]]*$"; then
+  # IMPORTANT: Only check the TAIL of output for termination signals.
+  # The prompt file contains example tags that would falsely match.
+  local output_tail
+  output_tail=$(echo "$output" | tail -c 5000)
+
+  # Check for <objective>MAX_ITERATIONS</objective> signal in the tail only
+  if ! echo "$output_tail" | grep -qE "^[[:space:]]*<objective>MAX_ITERATIONS</objective>[[:space:]]*$"; then
     return 1
   fi
 
@@ -2020,21 +2042,27 @@ EOF
     echo "═══════════════════════════════════════════════════════"
     echo "  Output length: ${#OUTPUT} chars"
 
-    # Quick scan for key markers
-    HAS_SUCCESS=$(echo "$OUTPUT" | grep -c "<objective>SUCCESS</objective>") || HAS_SUCCESS=0
-    HAS_METRICS_TAG=$(echo "$OUTPUT" | grep -c "<metrics>") || HAS_METRICS_TAG=0
-    HAS_PROGRESS_UPDATE=$(echo "$OUTPUT" | grep -c "progress.txt") || HAS_PROGRESS_UPDATE=0
-    echo "  Quick scan: SUCCESS=$HAS_SUCCESS, <metrics>=$HAS_METRICS_TAG, mentions progress.txt=$HAS_PROGRESS_UPDATE"
+    # IMPORTANT: Use output tail for all tag checks to avoid matching prompt examples.
+    # The prompt file (displayed at start in script mode) contains example tags.
+    OUTPUT_TAIL=$(echo "$OUTPUT" | tail -c 5000)
+    OUTPUT_TAIL_LEN=${#OUTPUT_TAIL}
+    echo "  Using tail for tag checks: last $OUTPUT_TAIL_LEN chars"
+
+    # Quick scan for key markers (in tail only - avoids matching prompt examples)
+    HAS_SUCCESS=$(echo "$OUTPUT_TAIL" | grep -c "<objective>SUCCESS</objective>") || HAS_SUCCESS=0
+    HAS_METRICS_TAG=$(echo "$OUTPUT_TAIL" | grep -c "<metrics>") || HAS_METRICS_TAG=0
+    HAS_PROGRESS_UPDATE=$(echo "$OUTPUT_TAIL" | grep -c "progress.txt") || HAS_PROGRESS_UPDATE=0
+    echo "  Quick scan (tail only): SUCCESS=$HAS_SUCCESS, <metrics>=$HAS_METRICS_TAG, mentions progress.txt=$HAS_PROGRESS_UPDATE"
 
     # Debug: Show first and last parts of output to help diagnose issues
     if [ ${#OUTPUT} -gt 0 ]; then
       echo ""
-      echo "  ┌─ First 300 chars of output ─────────────────────────"
+      echo "  ┌─ First 300 chars (may be prompt) ───────────────────"
       echo "$OUTPUT" | head -c 300 | sed 's/^/  │ /'
       echo ""
       echo "  └────────────────────────────────────────────────────"
       echo ""
-      echo "  ┌─ Last 600 chars of output ──────────────────────────"
+      echo "  ┌─ Last 600 chars (Claude's response) ────────────────"
       echo "$OUTPUT" | tail -c 600 | sed 's/^/  │ /'
       echo ""
       echo "  └────────────────────────────────────────────────────"
@@ -2046,11 +2074,11 @@ EOF
     echo ""
 
     # Check for iteration completion signal (required to properly bound iterations)
-    # Accept multiple formats:
+    # Accept multiple formats (check TAIL only to avoid prompt examples):
     #   - <iteration>COMPLETE</iteration> (preferred XML format)
     #   - Just "COMPLETE" on its own line (Claude sometimes outputs this)
     #   - Any termination signal (SUCCESS, IMPOSSIBLE, PLATEAU)
-    HAS_ITERATION_COMPLETE=$(echo "$OUTPUT" | grep -cE "<iteration>COMPLETE</iteration>|<objective>(SUCCESS|IMPOSSIBLE|PLATEAU)</objective>|^[[:space:]]*COMPLETE[[:space:]]*$") || HAS_ITERATION_COMPLETE=0
+    HAS_ITERATION_COMPLETE=$(echo "$OUTPUT_TAIL" | grep -cE "<iteration>COMPLETE</iteration>|<objective>(SUCCESS|IMPOSSIBLE|PLATEAU)</objective>|^[[:space:]]*COMPLETE[[:space:]]*$") || HAS_ITERATION_COMPLETE=0
 
     if [ "$HAS_ITERATION_COMPLETE" -eq 0 ]; then
       echo "  ⚠ ITERATION BOUNDARY MISSING"
@@ -2060,12 +2088,12 @@ EOF
       echo "  ✓ Iteration boundary signal found"
     fi
 
-    # Check for metrics block
-    HAS_METRICS_BLOCK=$(echo "$OUTPUT" | grep -c "<metrics>") || HAS_METRICS_BLOCK=0
+    # Check for metrics block (in tail only)
+    HAS_METRICS_BLOCK=$(echo "$OUTPUT_TAIL" | grep -c "<metrics>") || HAS_METRICS_BLOCK=0
     echo "  Has <metrics> block: $HAS_METRICS_BLOCK"
 
     echo "  Extracting metrics..."
-    EXTRACTED_METRICS=$(extract_metrics "$OUTPUT")
+    EXTRACTED_METRICS=$(extract_metrics "$OUTPUT_TAIL")
     if [ -n "$EXTRACTED_METRICS" ] && [ "$EXTRACTED_METRICS" != "{}" ]; then
       echo "  ✓ Extracted metrics from output: $EXTRACTED_METRICS"
     else
