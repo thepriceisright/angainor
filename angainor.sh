@@ -641,9 +641,42 @@ check_objective_success() {
   # Warn if SUCCESS is signaled without metrics
   if [ -z "$metrics" ] || [ "$metrics" = "{}" ] || [ "$metrics" = "null" ]; then
     echo ""
-    echo "  ⚠ WARNING: SUCCESS signaled without valid metrics!"
-    echo "    This may indicate Claude didn't run the benchmark or output was corrupted."
-    echo "    Check the transcript file for details."
+    echo "  ╔═══════════════════════════════════════════════════════"
+    echo "  ║ ⚠ WARNING: SUCCESS signaled without valid metrics!"
+    echo "  ╠═══════════════════════════════════════════════════════"
+    echo "  ║ This may indicate Claude didn't run the benchmark or"
+    echo "  ║ output was corrupted."
+    echo "  ║"
+
+    # Check if progress.txt was modified recently (within last 2 minutes)
+    if [ -f "$PROGRESS_FILE" ]; then
+      PROGRESS_MOD_TIME=$(stat -c %Y "$PROGRESS_FILE" 2>/dev/null || stat -f %m "$PROGRESS_FILE" 2>/dev/null || echo "0")
+      CURRENT_TIME=$(date +%s)
+      TIME_DIFF=$((CURRENT_TIME - PROGRESS_MOD_TIME))
+      if [ "$TIME_DIFF" -lt 120 ]; then
+        echo "  ║ progress.txt: Modified ${TIME_DIFF}s ago (OK)"
+      else
+        echo "  ║ progress.txt: NOT modified recently (${TIME_DIFF}s ago)"
+        echo "  ║   → Claude may not have done any work"
+      fi
+    else
+      echo "  ║ progress.txt: Does not exist"
+    fi
+
+    # Check transcript files
+    echo "  ║"
+    if [ -n "$TRANSCRIPT_FILE" ] && [ -f "$TRANSCRIPT_FILE" ]; then
+      TRANS_SIZE=$(wc -c < "$TRANSCRIPT_FILE" 2>/dev/null | tr -d ' ')
+      echo "  ║ Transcript: $TRANSCRIPT_FILE ($TRANS_SIZE bytes)"
+    fi
+    RAW_TRANSCRIPT="${TRANSCRIPT_FILE%.txt}.raw.txt"
+    if [ -f "$RAW_TRANSCRIPT" ]; then
+      RAW_SIZE=$(wc -c < "$RAW_TRANSCRIPT" 2>/dev/null | tr -d ' ')
+      echo "  ║ Raw transcript: $RAW_TRANSCRIPT ($RAW_SIZE bytes)"
+    fi
+    echo "  ║"
+    echo "  ║ Review the transcript files for what Claude actually output."
+    echo "  ╚═══════════════════════════════════════════════════════"
     echo ""
   fi
 
@@ -1594,8 +1627,13 @@ DYNAMIC_HEADER
       fi
     fi
 
-    # Also write to transcript file
-    cat "$STDOUT_FILE" > "$TRANSCRIPT_FILE" 2>/dev/null || true
+    # Save both raw and processed output to transcript
+    # Raw output goes to .raw.txt, processed goes to the regular transcript
+    RAW_TRANSCRIPT_FILE="${TRANSCRIPT_FILE%.txt}.raw.txt"
+    cat "$STDOUT_FILE" > "$RAW_TRANSCRIPT_FILE" 2>/dev/null || true
+    echo "$OUTPUT" > "$TRANSCRIPT_FILE" 2>/dev/null || true
+    echo "  [DEBUG] Saved raw transcript: $RAW_TRANSCRIPT_FILE ($(wc -c < "$RAW_TRANSCRIPT_FILE" 2>/dev/null | tr -d ' ') bytes)"
+    echo "  [DEBUG] Saved processed transcript: $TRANSCRIPT_FILE ($(wc -c < "$TRANSCRIPT_FILE" 2>/dev/null | tr -d ' ') bytes)"
 
     # Debug: Show file sizes
     if [ -n "$DEBUG_LOG" ]; then
@@ -1977,20 +2015,35 @@ EOF
   # For Objective mode: check for iteration boundary signal and extract metrics
   if [ "$MODE" = "objective" ]; then
     echo ""
+    echo "═══════════════════════════════════════════════════════"
     echo "  [Objective Mode Processing]"
+    echo "═══════════════════════════════════════════════════════"
     echo "  Output length: ${#OUTPUT} chars"
+
+    # Quick scan for key markers
+    HAS_SUCCESS=$(echo "$OUTPUT" | grep -c "<objective>SUCCESS</objective>") || HAS_SUCCESS=0
+    HAS_METRICS_TAG=$(echo "$OUTPUT" | grep -c "<metrics>") || HAS_METRICS_TAG=0
+    HAS_PROGRESS_UPDATE=$(echo "$OUTPUT" | grep -c "progress.txt") || HAS_PROGRESS_UPDATE=0
+    echo "  Quick scan: SUCCESS=$HAS_SUCCESS, <metrics>=$HAS_METRICS_TAG, mentions progress.txt=$HAS_PROGRESS_UPDATE"
 
     # Debug: Show first and last parts of output to help diagnose issues
     if [ ${#OUTPUT} -gt 0 ]; then
-      echo "  [DEBUG] First 200 chars of output:"
-      echo "$OUTPUT" | head -c 200 | sed 's/^/    /'
       echo ""
-      echo "  [DEBUG] Last 500 chars of output:"
-      echo "$OUTPUT" | tail -c 500 | sed 's/^/    /'
+      echo "  ┌─ First 300 chars of output ─────────────────────────"
+      echo "$OUTPUT" | head -c 300 | sed 's/^/  │ /'
       echo ""
+      echo "  └────────────────────────────────────────────────────"
+      echo ""
+      echo "  ┌─ Last 600 chars of output ──────────────────────────"
+      echo "$OUTPUT" | tail -c 600 | sed 's/^/  │ /'
+      echo ""
+      echo "  └────────────────────────────────────────────────────"
     else
-      echo "  [DEBUG] Output is empty!"
+      echo ""
+      echo "  ⚠ OUTPUT IS EMPTY! Claude returned no text."
+      echo "    Check the raw transcript file for terminal artifacts."
     fi
+    echo ""
 
     # Check for iteration completion signal (required to properly bound iterations)
     # Accept multiple formats:
