@@ -16,6 +16,7 @@ VERBOSE=false
 DEBUG_LOG=""
 CLAUDE_TIMEOUT=""  # Will be set to default later if not specified
 LIVE_OUTPUT=false  # Show Claude output in real-time
+LLM_EXTRACTION=true  # Use LLM to extract data from unstructured output
 
 while [[ $# -gt 0 ]]; do
   case $1 in
@@ -65,6 +66,11 @@ while [[ $# -gt 0 ]]; do
       LIVE_OUTPUT_EXPLICIT=true
       shift
       ;;
+    --no-llm-extraction)
+      # Disable LLM-based extraction of metrics/priority from unstructured output
+      LLM_EXTRACTION=false
+      shift
+      ;;
     --help|-h)
       echo "Usage: ./angainor.sh [OPTIONS] [max_iterations]"
       echo ""
@@ -78,6 +84,7 @@ while [[ $# -gt 0 ]]; do
       echo "  --verbose, -v     Enable verbose output for debugging"
       echo "  --debug           Enable debug logging to angainor-debug.log"
       echo "  --debug=FILE      Enable debug logging to specific file"
+      echo "  --no-llm-extraction  Disable LLM-based extraction (requires OPENROUTER_API_KEY)"
       echo "  --help, -h        Show this help message"
       echo ""
       echo "Arguments:"
@@ -101,6 +108,34 @@ done
 
 # Set default max iterations
 MAX_ITERATIONS=${MAX_ITERATIONS:-10}
+
+# Load .env file if it exists (for API keys)
+if [ -f "$SCRIPT_DIR/.env" ]; then
+  # shellcheck disable=SC1091
+  source "$SCRIPT_DIR/.env"
+elif [ -f ".env" ]; then
+  # shellcheck disable=SC1091
+  source ".env"
+fi
+
+# Check for required API key in objective mode with LLM extraction
+if [ "$MODE" = "objective" ] && [ "$LLM_EXTRACTION" = true ]; then
+  if [ -z "$OPENROUTER_API_KEY" ]; then
+    echo "Error: OPENROUTER_API_KEY is required for objective mode."
+    echo ""
+    echo "LLM extraction uses OpenRouter to parse agent output into structured data."
+    echo "This ensures metrics and priority directives are captured even when the"
+    echo "agent doesn't output perfect XML tags."
+    echo ""
+    echo "To fix:"
+    echo "  1. Create a .env file with: OPENROUTER_API_KEY=your-key-here"
+    echo "  2. Or export OPENROUTER_API_KEY in your shell"
+    echo "  3. Or use --no-llm-extraction to disable (not recommended)"
+    echo ""
+    echo "Get an API key at: https://openrouter.ai/keys"
+    exit 1
+  fi
+fi
 
 # Logging functions
 log_verbose() {
@@ -434,6 +469,119 @@ extract_metrics() {
     # Output the constructed JSON
     echo "$json_obj" | jq -c '.'
   fi
+}
+
+# Extract structured data from agent output using LLM (OpenRouter)
+# This is a fallback when XML parsing fails - extracts metrics and priority
+# from natural language output
+# Arguments: raw_output iteration_number
+# Returns: JSON with metrics and priority_directive (or empty on failure)
+extract_with_llm() {
+  local output="$1"
+  local iteration="$2"
+
+  # Skip if LLM extraction is disabled
+  if [ "$LLM_EXTRACTION" != true ]; then
+    log_verbose "LLM extraction disabled"
+    return 0
+  fi
+
+  # Check for API key
+  if [ -z "$OPENROUTER_API_KEY" ]; then
+    log_verbose "No OPENROUTER_API_KEY, skipping LLM extraction"
+    return 0
+  fi
+
+  echo "  Using LLM to extract structured data from output..."
+
+  # Truncate output to last 8000 chars to stay within context limits
+  local truncated_output
+  truncated_output=$(echo "$output" | tail -c 8000)
+
+  # Build the extraction prompt
+  local extraction_prompt
+  extraction_prompt=$(cat <<'EXTRACTION_PROMPT'
+Extract structured data from this AI agent iteration output. Output ONLY valid JSON, nothing else.
+
+Required fields:
+- metrics: object with numerical measurements found in output (accuracy, precision, recall, F1, etc.)
+- iteration_complete: boolean - did the agent signal it finished? (look for COMPLETE, done, finished)
+- priority_directive: object describing what the agent suggests trying next, with:
+  - directive: specific actionable suggestion (or null if none)
+  - reason: why this is important (or null)
+  - approach_category: one of PARAMETER_TUNING, ALGORITHM_CHANGE, DATA_PIPELINE, ARCHITECTURE, ERROR_ANALYSIS, ASSUMPTION_CHALLENGE (or null)
+  - suggestions: array of specific options to try (or empty array)
+
+Rules:
+- Only extract metrics that have explicit numerical values in the output
+- Look for "Consider:", "Next:", "Try:", "Should try:" patterns for priority directives
+- If unsure about a field, use null
+- Output MUST be valid JSON only - no markdown, no explanation
+
+Example output format:
+{"metrics":{"fixture_type_accuracy":0.33},"iteration_complete":true,"priority_directive":{"directive":"Try X","reason":"Because Y","approach_category":"ALGORITHM_CHANGE","suggestions":["option1","option2"]}}
+EXTRACTION_PROMPT
+)
+
+  # Create the full prompt with the agent output
+  local full_prompt="$extraction_prompt
+
+AGENT OUTPUT TO ANALYZE:
+$truncated_output
+
+JSON:"
+
+  # Call OpenRouter API with Claude Haiku 4.5
+  local response
+  local http_code
+  local temp_file
+  temp_file=$(mktemp)
+
+  # Use curl with error handling
+  http_code=$(curl -s -w "%{http_code}" -o "$temp_file" \
+    "https://openrouter.ai/api/v1/chat/completions" \
+    -H "Authorization: Bearer $OPENROUTER_API_KEY" \
+    -H "Content-Type: application/json" \
+    -H "HTTP-Referer: https://github.com/anthropics/angainor" \
+    -d "$(jq -n \
+      --arg prompt "$full_prompt" \
+      '{
+        model: "anthropic/claude-3.5-haiku",
+        max_tokens: 1024,
+        temperature: 0,
+        messages: [{role: "user", content: $prompt}]
+      }')" 2>/dev/null) || http_code="000"
+
+  if [ "$http_code" != "200" ]; then
+    echo "  ⚠ LLM extraction failed (HTTP $http_code)" >&2
+    rm -f "$temp_file"
+    return 1
+  fi
+
+  # Extract the response content
+  response=$(jq -r '.choices[0].message.content // empty' "$temp_file" 2>/dev/null)
+  rm -f "$temp_file"
+
+  if [ -z "$response" ]; then
+    echo "  ⚠ LLM returned empty response" >&2
+    return 1
+  fi
+
+  # Clean up the response - remove markdown code blocks if present
+  response=$(echo "$response" | sed 's/^```json//g' | sed 's/^```//g' | sed 's/```$//g' | tr -d '\n' | sed 's/^[[:space:]]*//')
+
+  # Validate it's valid JSON
+  if ! echo "$response" | jq '.' >/dev/null 2>&1; then
+    echo "  ⚠ LLM returned invalid JSON" >&2
+    log_verbose "Invalid LLM response: $response"
+    return 1
+  fi
+
+  echo "  ✓ LLM extraction successful"
+  log_verbose "LLM extracted: $response"
+
+  # Output the JSON
+  echo "$response"
 }
 
 # Print comprehensive objective summary on completion
@@ -2242,37 +2390,53 @@ EOF
 
     echo "  Extracting metrics..."
     EXTRACTED_METRICS=$(extract_metrics "$OUTPUT_TAIL")
-    if [ -n "$EXTRACTED_METRICS" ] && [ "$EXTRACTED_METRICS" != "{}" ]; then
-      echo "  ✓ Extracted metrics from output: $EXTRACTED_METRICS"
-    else
-      echo "  ⚠ No metrics in output - trying to extract from progress.txt..."
+    LLM_EXTRACTED=""  # Will store LLM extraction result if needed
 
-      # Fallback: extract metrics from progress.txt
-      EXTRACTED_METRICS="{}"
-      if [ -f "$PROGRESS_FILE" ]; then
-        METRICS_TO_TRACK=$(jq -r '.verification.metricsToTrack // [] | .[]' "$CONFIG_FILE" 2>/dev/null)
-        for metric in $METRICS_TO_TRACK; do
-          # Pattern: "metric_name: X → Y" - extract Y (the after value)
-          METRIC_VALUE=$(tail -150 "$PROGRESS_FILE" | grep -oE "${metric}[^0-9]*[0-9]+\.[0-9]+ *→ *[0-9]+\.[0-9]+" | tail -1 | grep -oE '[0-9]+\.[0-9]+$' || echo "")
-          if [ -z "$METRIC_VALUE" ]; then
-            # Try pattern without arrow: "metric_name: Y" or "metric_name=Y"
-            METRIC_VALUE=$(tail -150 "$PROGRESS_FILE" | grep -oE "${metric}[^0-9]*[0-9]+\.[0-9]+" | tail -1 | grep -oE '[0-9]+\.[0-9]+' || echo "")
-          fi
-          if [ -n "$METRIC_VALUE" ]; then
-            EXTRACTED_METRICS=$(echo "$EXTRACTED_METRICS" | jq --arg k "$metric" --argjson v "$METRIC_VALUE" '. + {($k): $v}')
-            echo "    Found $metric: $METRIC_VALUE in progress.txt"
-          fi
-        done
+    if [ -n "$EXTRACTED_METRICS" ] && [ "$EXTRACTED_METRICS" != "{}" ]; then
+      echo "  ✓ Extracted metrics from XML: $EXTRACTED_METRICS"
+    else
+      echo "  ⚠ No XML metrics found - trying LLM extraction..."
+
+      # Fallback 1: Use LLM to extract from natural language
+      LLM_EXTRACTED=$(extract_with_llm "$OUTPUT_TAIL" "$i" 2>&1)
+      if [ -n "$LLM_EXTRACTED" ] && echo "$LLM_EXTRACTED" | jq '.' >/dev/null 2>&1; then
+        # Extract metrics from LLM response
+        LLM_METRICS=$(echo "$LLM_EXTRACTED" | jq -c '.metrics // {}')
+        if [ -n "$LLM_METRICS" ] && [ "$LLM_METRICS" != "{}" ] && [ "$LLM_METRICS" != "null" ]; then
+          EXTRACTED_METRICS="$LLM_METRICS"
+          echo "  ✓ Extracted metrics via LLM: $EXTRACTED_METRICS"
+        fi
       fi
 
-      if [ "$EXTRACTED_METRICS" != "{}" ]; then
-        echo "  ✓ Extracted metrics from progress.txt: $EXTRACTED_METRICS"
-      else
-        echo "  ⚠ Could not extract metrics from progress.txt either"
-        # Show last 500 chars of output for debugging
-        if [ ${#OUTPUT} -gt 0 ]; then
-          echo "  Output tail (last 500 chars):"
-          echo "$OUTPUT" | tail -c 500 | sed 's/^/    /'
+      # Fallback 2: Extract metrics from progress.txt
+      if [ -z "$EXTRACTED_METRICS" ] || [ "$EXTRACTED_METRICS" = "{}" ]; then
+        echo "  ⚠ LLM extraction failed - trying progress.txt..."
+        EXTRACTED_METRICS="{}"
+        if [ -f "$PROGRESS_FILE" ]; then
+          METRICS_TO_TRACK=$(jq -r '.verification.metricsToTrack // [] | .[]' "$CONFIG_FILE" 2>/dev/null)
+          for metric in $METRICS_TO_TRACK; do
+            # Pattern: "metric_name: X → Y" - extract Y (the after value)
+            METRIC_VALUE=$(tail -150 "$PROGRESS_FILE" | grep -oE "${metric}[^0-9]*[0-9]+\.[0-9]+ *→ *[0-9]+\.[0-9]+" | tail -1 | grep -oE '[0-9]+\.[0-9]+$' || echo "")
+            if [ -z "$METRIC_VALUE" ]; then
+              # Try pattern without arrow: "metric_name: Y" or "metric_name=Y"
+              METRIC_VALUE=$(tail -150 "$PROGRESS_FILE" | grep -oE "${metric}[^0-9]*[0-9]+\.[0-9]+" | tail -1 | grep -oE '[0-9]+\.[0-9]+' || echo "")
+            fi
+            if [ -n "$METRIC_VALUE" ]; then
+              EXTRACTED_METRICS=$(echo "$EXTRACTED_METRICS" | jq --arg k "$metric" --argjson v "$METRIC_VALUE" '. + {($k): $v}')
+              echo "    Found $metric: $METRIC_VALUE in progress.txt"
+            fi
+          done
+        fi
+
+        if [ "$EXTRACTED_METRICS" != "{}" ]; then
+          echo "  ✓ Extracted metrics from progress.txt: $EXTRACTED_METRICS"
+        else
+          echo "  ⚠ Could not extract metrics from any source"
+          # Show last 500 chars of output for debugging
+          if [ ${#OUTPUT} -gt 0 ]; then
+            echo "  Output tail (last 500 chars):"
+            echo "$OUTPUT" | tail -c 500 | sed 's/^/    /'
+          fi
         fi
       fi
     fi
@@ -2286,9 +2450,43 @@ EOF
 
     # Handle priority directives:
     # 1. Clear existing priority if iteration responded to it
-    # 2. Parse and set any new priority for next iteration
+    # 2. Parse and set any new priority for next iteration (try XML first, then LLM)
     clear_priority_if_responded "$OUTPUT"
     parse_and_set_priority "$OUTPUT" "$i"
+
+    # If XML priority parsing didn't find anything, try LLM extraction result
+    if [ -n "$LLM_EXTRACTED" ] && echo "$LLM_EXTRACTED" | jq '.' >/dev/null 2>&1; then
+      LLM_PRIORITY=$(echo "$LLM_EXTRACTED" | jq -c '.priority_directive // null')
+      if [ "$LLM_PRIORITY" != "null" ]; then
+        # Check if we already have a priority set
+        EXISTING_PRIORITY=$(jq -r '.status.nextIterationPriority // null' "$CONFIG_FILE")
+        if [ "$EXISTING_PRIORITY" = "null" ]; then
+          # Extract fields from LLM priority
+          LLM_DIRECTIVE=$(echo "$LLM_PRIORITY" | jq -r '.directive // empty')
+          LLM_REASON=$(echo "$LLM_PRIORITY" | jq -r '.reason // empty')
+          LLM_CATEGORY=$(echo "$LLM_PRIORITY" | jq -r '.approach_category // empty')
+          LLM_SUGGESTIONS=$(echo "$LLM_PRIORITY" | jq -c '.suggestions // []')
+
+          if [ -n "$LLM_DIRECTIVE" ]; then
+            echo "  Setting priority from LLM extraction..."
+            echo "    directive: $LLM_DIRECTIVE"
+            jq --arg d "$LLM_DIRECTIVE" \
+               --arg r "$LLM_REASON" \
+               --arg c "$LLM_CATEGORY" \
+               --argjson s "$LLM_SUGGESTIONS" \
+               --argjson iter "$i" \
+               '.status.nextIterationPriority = {
+                 directive: $d,
+                 reason: $r,
+                 approachCategory: $c,
+                 suggestions: $s,
+                 setByIteration: $iter
+               }' "$CONFIG_FILE" > "$CONFIG_FILE.tmp" && mv "$CONFIG_FILE.tmp" "$CONFIG_FILE"
+            echo "  ✓ Priority directive set from LLM extraction"
+          fi
+        fi
+      fi
+    fi
 
     # Check for SUCCESS termination signal
     if check_objective_success "$OUTPUT" "$EXTRACTED_METRICS"; then
