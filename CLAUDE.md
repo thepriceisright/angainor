@@ -223,6 +223,26 @@ Iterations can set mandatory priorities for the next iteration, ensuring importa
 
 See `objective-prompt.md` for full details.
 
+### LLM Output Extraction (Objective Mode)
+When the agent doesn't output proper XML tags, angainor.sh uses an LLM (via OpenRouter) to extract structured data from natural language output.
+
+**Extraction chain:**
+1. **XML parsing** (free, instant) - Try to extract `<metrics>`, `<set_priority>` tags
+2. **LLM extraction** (~$0.001, ~2s) - Use Claude Haiku 4.5 to parse natural language
+3. **progress.txt parsing** (free) - Regex extraction from progress file
+
+**What it extracts:**
+- Metrics (numerical measurements like accuracy, precision, recall)
+- Priority directives (suggestions for next iteration from "Consider:", "Try:", etc.)
+- Iteration completion status
+
+**Requirements:**
+- `OPENROUTER_API_KEY` in `.env` file or environment
+- Cost: ~$0.001 per extraction (~$0.10 for 100 iterations)
+
+**Flags:**
+- `--no-llm-extraction`: Disable LLM extraction (not recommended)
+
 ### Angainor Profile
 angainor.sh configures a minimal plugin environment for autonomous runs:
 
