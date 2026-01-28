@@ -1439,33 +1439,7 @@ DYNAMIC_HEADER
     STDERR_FILE=$(mktemp)
     STDOUT_FILE=$(mktemp)
 
-    echo "  [DEBUG] Temp files: stdout=$STDOUT_FILE, stderr=$STDERR_FILE"
-    echo "  [DEBUG] Prompt file: $EFFECTIVE_PROMPT_FILE ($(wc -c < "$EFFECTIVE_PROMPT_FILE" 2>/dev/null | tr -d ' ' || echo 'N/A') bytes)"
-
-    # Debug: Test if Claude CLI output capture works with same flags (first attempt only)
-    if [ "$retry" -eq 1 ]; then
-      echo "  [DEBUG] Pre-flight: Testing output capture mechanism..."
-      TEST_STDOUT=$(mktemp)
-      TEST_STDERR=$(mktemp)
-      echo "respond with OK only" | timeout 30 claude --dangerously-skip-permissions --print --output-format text > "$TEST_STDOUT" 2> "$TEST_STDERR" || true
-      sync 2>/dev/null || true
-      sleep 0.3
-      TEST_OUT_SIZE=$(wc -c < "$TEST_STDOUT" 2>/dev/null | tr -d ' ' || echo "0")
-      TEST_ERR_SIZE=$(wc -c < "$TEST_STDERR" 2>/dev/null | tr -d ' ' || echo "0")
-      echo "  [DEBUG] Pre-flight result: stdout=$TEST_OUT_SIZE bytes, stderr=$TEST_ERR_SIZE bytes"
-      if [ "$TEST_OUT_SIZE" -eq 0 ] && [ "$TEST_ERR_SIZE" -eq 0 ]; then
-        echo "  ⚠ Pre-flight: Output capture returned 0 bytes - may have capture issues"
-        # Try alternative capture to diagnose
-        ALT_OUT=$(echo "respond with OK" | timeout 30 claude --print 2>&1 || echo "")
-        echo "  [DEBUG] Alternative (2>&1): ${#ALT_OUT} chars"
-        if [ ${#ALT_OUT} -gt 0 ]; then
-          echo "  [DEBUG] Alternative works - issue is with file redirection"
-        fi
-      else
-        echo "  [DEBUG] Pre-flight: Output capture working"
-      fi
-      rm -f "$TEST_STDOUT" "$TEST_STDERR"
-    fi
+    log_verbose "Temp files: stdout=$STDOUT_FILE, stderr=$STDERR_FILE"
 
     # Run Claude and capture output to files for reliable capture
     # Run in background to capture PID for interrupt handling
@@ -1545,7 +1519,7 @@ DYNAMIC_HEADER
 
     # Wait for Claude to complete (this allows interrupt signals to be caught)
     # For live mode, use a polling loop with a grace period to handle hanging processes
-    echo "  [DEBUG] Waiting for Claude process (PID: $CLAUDE_PID)..."
+    log_verbose "Waiting for Claude process (PID: $CLAUDE_PID)"
 
     if [ "$LIVE_OUTPUT" = true ]; then
       # Polling wait with grace period for live mode
@@ -1592,7 +1566,7 @@ DYNAMIC_HEADER
       CLAUDE_EXIT_CODE=$?
     fi
 
-    echo "  [DEBUG] Claude process completed with exit code: $CLAUDE_EXIT_CODE"
+    log_verbose "Claude process completed with exit code: $CLAUDE_EXIT_CODE"
     CLAUDE_PID=""  # Clear PID after completion
 
     # Ensure filesystem buffers are flushed before reading output files
@@ -1609,15 +1583,6 @@ DYNAMIC_HEADER
     fi
 
     # Read captured output from files
-    echo "  [DEBUG] Reading captured output..."
-
-    # Debug: Check file existence and size before reading
-    if [ -f "$STDOUT_FILE" ]; then
-      STDOUT_SIZE_PRE=$(wc -c < "$STDOUT_FILE" 2>/dev/null | tr -d ' ' || echo "0")
-      echo "  [DEBUG] STDOUT file exists, size before read: $STDOUT_SIZE_PRE bytes"
-    else
-      echo "  [DEBUG] WARNING: STDOUT file does not exist: $STDOUT_FILE"
-    fi
     if [ "$LIVE_OUTPUT" = true ]; then
       # Strip terminal artifacts from script output (interactive mode includes lots of formatting)
       # This includes:
@@ -1647,14 +1612,14 @@ DYNAMIC_HEADER
       OUTPUT=$(cat "$STDOUT_FILE" 2>/dev/null || echo "")
     fi
     STDERR_CONTENT=$(cat "$STDERR_FILE" 2>/dev/null || echo "")
-    echo "  [DEBUG] Output captured: ${#OUTPUT} chars, stderr: ${#STDERR_CONTENT} chars"
+    log_verbose "Output captured: ${#OUTPUT} chars, stderr: ${#STDERR_CONTENT} chars"
 
     # If stdout is empty but stderr has content, Claude may have output there
     if [ ${#OUTPUT} -eq 0 ] && [ ${#STDERR_CONTENT} -gt 100 ]; then
-      echo "  [DEBUG] Stdout empty but stderr has content - checking if it's valid output..."
+      log_verbose "Stdout empty but stderr has content - checking for output markers"
       # Check if stderr contains iteration markers (output went to wrong stream)
       if echo "$STDERR_CONTENT" | grep -q -E '<metrics>|<iteration>|<objective>'; then
-        echo "  [DEBUG] Found output markers in stderr, using stderr as output"
+        log_verbose "Found output markers in stderr, using stderr as output"
         OUTPUT="$STDERR_CONTENT"
       fi
     fi
@@ -1664,8 +1629,6 @@ DYNAMIC_HEADER
     RAW_TRANSCRIPT_FILE="${TRANSCRIPT_FILE%.txt}.raw.txt"
     cat "$STDOUT_FILE" > "$RAW_TRANSCRIPT_FILE" 2>/dev/null || true
     echo "$OUTPUT" > "$TRANSCRIPT_FILE" 2>/dev/null || true
-    echo "  [DEBUG] Saved raw transcript: $RAW_TRANSCRIPT_FILE ($(wc -c < "$RAW_TRANSCRIPT_FILE" 2>/dev/null | tr -d ' ') bytes)"
-    echo "  [DEBUG] Saved processed transcript: $TRANSCRIPT_FILE ($(wc -c < "$TRANSCRIPT_FILE" 2>/dev/null | tr -d ' ') bytes)"
 
     # Debug: Show file sizes
     if [ -n "$DEBUG_LOG" ]; then
@@ -1966,12 +1929,9 @@ EOF
      '.transcripts += [{"file": $file, "timestamp": $ts, "iteration": ($iter|tonumber), "branch": $branch, "storyId": $story}]' \
      "$TRANSCRIPT_INDEX" > "$TRANSCRIPT_INDEX.tmp" && mv "$TRANSCRIPT_INDEX.tmp" "$TRANSCRIPT_INDEX"
 
-  echo "  [DEBUG] Starting post-iteration processing..."
-
   # Check for completion signal FIRST - if all stories are done, no verification needed
   # Use anchored grep to avoid false positives when Claude mentions the tag in prose
   # (e.g., "I will not output <promise>COMPLETE</promise>")
-  echo "  [DEBUG] Checking for PRD completion signal..."
   if echo "$OUTPUT" | grep -qE "^[[:space:]]*<promise>COMPLETE</promise>[[:space:]]*$"; then
     echo ""
     echo "Angainor completed all tasks!"
@@ -1985,7 +1945,6 @@ EOF
   # Accept either <verification> XML blocks OR ✅ checkmarks as valid verification
   # Skip for synthesized iterations (recovered from git evidence)
   # Skip for objective mode (uses <metrics> + <iteration>COMPLETE</iteration> instead)
-  echo "  [DEBUG] Starting verification checks (mode=$MODE)..."
   VERIFICATION_FAILED=false
   FAILURE_REASON=""
 
@@ -2040,48 +1999,25 @@ EOF
   fi
 
   # Record successful iteration metrics
-  echo "  [DEBUG] Verification passed, recording metrics for story: $STORY_ID"
   record_metrics "success" "$STORY_ID" ""
-  echo "  [DEBUG] Metrics recorded, checking mode..."
 
   # For Objective mode: check for iteration boundary signal and extract metrics
   if [ "$MODE" = "objective" ]; then
     echo ""
-    echo "═══════════════════════════════════════════════════════"
     echo "  [Objective Mode Processing]"
-    echo "═══════════════════════════════════════════════════════"
-    echo "  Output length: ${#OUTPUT} chars"
+    log_verbose "Output length: ${#OUTPUT} chars"
 
     # IMPORTANT: Use output tail for all tag checks to avoid matching prompt examples.
     # The prompt file (displayed at start in script mode) contains example tags.
     OUTPUT_TAIL=$(echo "$OUTPUT" | tail -c 5000)
-    OUTPUT_TAIL_LEN=${#OUTPUT_TAIL}
-    echo "  Using tail for tag checks: last $OUTPUT_TAIL_LEN chars"
 
     # Quick scan for key markers (in tail only - avoids matching prompt examples)
     HAS_SUCCESS=$(echo "$OUTPUT_TAIL" | grep -c "<objective>SUCCESS</objective>") || HAS_SUCCESS=0
     HAS_METRICS_TAG=$(echo "$OUTPUT_TAIL" | grep -c "<metrics>") || HAS_METRICS_TAG=0
-    HAS_PROGRESS_UPDATE=$(echo "$OUTPUT_TAIL" | grep -c "progress.txt") || HAS_PROGRESS_UPDATE=0
-    echo "  Quick scan (tail only): SUCCESS=$HAS_SUCCESS, <metrics>=$HAS_METRICS_TAG, mentions progress.txt=$HAS_PROGRESS_UPDATE"
 
-    # Debug: Show first and last parts of output to help diagnose issues
-    if [ ${#OUTPUT} -gt 0 ]; then
-      echo ""
-      echo "  ┌─ First 300 chars (may be prompt) ───────────────────"
-      echo "$OUTPUT" | head -c 300 | sed 's/^/  │ /'
-      echo ""
-      echo "  └────────────────────────────────────────────────────"
-      echo ""
-      echo "  ┌─ Last 600 chars (Claude's response) ────────────────"
-      echo "$OUTPUT" | tail -c 600 | sed 's/^/  │ /'
-      echo ""
-      echo "  └────────────────────────────────────────────────────"
-    else
-      echo ""
+    if [ ${#OUTPUT} -eq 0 ]; then
       echo "  ⚠ OUTPUT IS EMPTY! Claude returned no text."
-      echo "    Check the raw transcript file for terminal artifacts."
     fi
-    echo ""
 
     # Check for iteration completion signal (required to properly bound iterations)
     # Accept multiple formats (check TAIL only to avoid prompt examples):
@@ -2188,11 +2124,9 @@ EOF
       exit 4
     fi
 
-    echo "  [DEBUG] All termination checks passed - iteration will continue"
   fi
 
   # Extract skill candidates from iteration output (failures don't break loop)
-  echo "  [DEBUG] Checking for skill candidates..."
   write_skill_candidate "$OUTPUT" "$STORY_ID" || true
 
   # Clean up dynamic prompt file if created
@@ -2202,7 +2136,6 @@ EOF
   fi
 
   echo ""
-  echo "  [DEBUG] Iteration $i complete - proceeding to next iteration in 2s..."
   echo "Iteration $i complete. Continuing..."
   sleep 2
 done
