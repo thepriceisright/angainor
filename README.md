@@ -15,6 +15,8 @@ Based on [Geoffrey Huntley's Ralph pattern](https://ghuntley.com/ralph/).
 - **Automatic Skill Extraction**: Discovers and saves reusable learnings for future projects
 - **Metrics Tracking**: Records iteration duration, success rates, and estimated token usage
 - **Plateau Detection**: Automatically detects when objective progress stalls
+- **Priority Directives**: Iterations can queue mandatory actions for the next iteration
+- **LLM Output Extraction**: Robust parsing of agent output even without proper XML tags
 
 ## Quick Start
 
@@ -23,6 +25,7 @@ Based on [Geoffrey Huntley's Ralph pattern](https://ghuntley.com/ralph/).
 - [Claude Code CLI](https://claude.ai/code) installed and authenticated
 - Bash shell (Linux/macOS)
 - `jq` for JSON processing
+- **OpenRouter API key** (for Objective mode) - [Get one here](https://openrouter.ai/keys)
 
 ### Installation
 
@@ -67,7 +70,11 @@ cd angainor
 **Objective Mode** - Iterate toward a measurable goal:
 
 ```bash
-# Create your objective.json (see objective.json.example)
+# 1. Create .env with your OpenRouter API key
+echo "OPENROUTER_API_KEY=your-key-here" > .env
+
+# 2. Create your objective.json (see objective.json.example)
+# 3. Run Angainor
 ./angainor.sh --objective      # Run up to 10 iterations
 ./angainor.sh --objective 15   # Run up to 15 iterations
 ```
@@ -75,10 +82,11 @@ cd angainor
 **Debugging** - Troubleshoot empty responses or API issues:
 
 ```bash
-./angainor.sh --verbose            # Show detailed API call info
-./angainor.sh --debug              # Log everything to angainor-debug.log
-./angainor.sh --debug=/tmp/log.txt # Custom debug log path
-./angainor.sh --help               # Show all options
+./angainor.sh --verbose               # Show detailed API call info
+./angainor.sh --debug                 # Log everything to angainor-debug.log
+./angainor.sh --debug=/tmp/log.txt    # Custom debug log path
+./angainor.sh --no-llm-extraction     # Disable LLM parsing (not recommended)
+./angainor.sh --help                  # Show all options
 ```
 
 The verbose mode shows:
@@ -123,6 +131,47 @@ Termination signals:
 - `IMPOSSIBLE` - Concrete evidence the objective cannot be achieved
 - `PLATEAU` - Diminishing returns after exhausting approaches
 - `MAX_ITERATIONS` - Iteration budget exhausted
+
+### Priority Directive System
+
+Iterations can queue mandatory actions for the next iteration, ensuring important discoveries are acted upon:
+
+```xml
+<!-- Iteration N sets a priority -->
+<set_priority>
+  <directive>Try GPT-4V for schedule extraction</directive>
+  <reason>Current model has poor accuracy on tables</reason>
+  <approachCategory>ALGORITHM_CHANGE</approachCategory>
+  <suggestions>["gpt-4v", "gemini-pro-vision"]</suggestions>
+</set_priority>
+```
+
+The next iteration **must** respond before doing anything else:
+
+```xml
+<priority_response>
+  <action>ATTEMPTING</action>
+  <directive>Try GPT-4V for schedule extraction</directive>
+  <response>Will test GPT-4V on projects 10083, 10022</response>
+</priority_response>
+```
+
+Valid skip reasons: `CONSTRAINT_VIOLATION`, `ALREADY_TRIED`, `SUPERSEDED`
+
+### LLM Output Extraction
+
+When the agent outputs natural language instead of XML tags, Angainor uses Claude Haiku 4.5 (via OpenRouter) to extract structured data:
+
+**Extraction chain:**
+1. **XML parsing** (free, instant) - Try to extract `<metrics>`, `<set_priority>` tags
+2. **LLM extraction** (~$0.001, ~2s) - Parse natural language with Claude Haiku
+3. **progress.txt parsing** (free) - Regex fallback
+
+This ensures metrics and priority directives are captured even when agents don't follow XML format perfectly.
+
+**Requirements:**
+- `OPENROUTER_API_KEY` in `.env` file
+- To disable: `--no-llm-extraction` (not recommended)
 
 ## Configuration Files
 
@@ -192,7 +241,8 @@ Defines the measurable goal for Objective mode.
     "state": "pending",
     "iterations": 0,
     "bestMetrics": {},
-    "metricHistory": []
+    "metricHistory": [],
+    "nextIterationPriority": null
   }
 }
 ```
