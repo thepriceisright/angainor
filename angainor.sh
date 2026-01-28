@@ -1071,18 +1071,33 @@ parse_and_set_priority() {
 
   echo "  Parsing priority directive from output..."
 
-  # Extract each field from the <set_priority> block
+  # Extract ONLY THE LAST <set_priority> block (avoid template examples from prompt)
+  # Use awk to find the last complete block
   local priority_block
-  priority_block=$(echo "$output" | sed -n '/<set_priority>/,/<\/set_priority>/p')
+  priority_block=$(echo "$output" | awk '
+    /<set_priority>/ { capture=1; block="" }
+    capture { block = block $0 "\n" }
+    /<\/set_priority>/ { capture=0; last_block=block }
+    END { printf "%s", last_block }
+  ')
 
   if [ -z "$priority_block" ]; then
     echo "  ⚠ Malformed <set_priority> block"
     return 1
   fi
 
+  # Helper function to extract content between XML tags (gets LAST occurrence)
+  # Handles both same-line <tag>content</tag> and multi-line formats
+  extract_last_tag_content() {
+    local text="$1"
+    local tag="$2"
+    # Use grep -oP for Perl regex to extract content between tags, take last match
+    echo "$text" | grep -oP "(?<=<${tag}>).*?(?=</${tag}>)" | tail -1 | sed 's/^[[:space:]]*//;s/[[:space:]]*$//'
+  }
+
   # Extract directive (required)
   local directive
-  directive=$(echo "$priority_block" | sed -n '/<directive>/,/<\/directive>/p' | sed '1d;$d' | tr '\n' ' ' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+  directive=$(extract_last_tag_content "$priority_block" "directive")
   if [ -z "$directive" ]; then
     echo "  ⚠ <set_priority> missing required <directive> field"
     return 1
@@ -1090,7 +1105,7 @@ parse_and_set_priority() {
 
   # Extract reason (required)
   local reason
-  reason=$(echo "$priority_block" | sed -n '/<reason>/,/<\/reason>/p' | sed '1d;$d' | tr '\n' ' ' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+  reason=$(extract_last_tag_content "$priority_block" "reason")
   if [ -z "$reason" ]; then
     echo "  ⚠ <set_priority> missing required <reason> field"
     return 1
@@ -1098,15 +1113,26 @@ parse_and_set_priority() {
 
   # Extract approachCategory (required)
   local approach_category
-  approach_category=$(echo "$priority_block" | sed -n '/<approachCategory>/,/<\/approachCategory>/p' | sed '1d;$d' | tr -d '\n' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+  approach_category=$(extract_last_tag_content "$priority_block" "approachCategory")
   if [ -z "$approach_category" ]; then
     echo "  ⚠ <set_priority> missing required <approachCategory> field"
     return 1
   fi
 
+  # Validate approachCategory is one of the allowed values
+  case "$approach_category" in
+    PARAMETER_TUNING|ALGORITHM_CHANGE|DATA_PIPELINE|ARCHITECTURE|ERROR_ANALYSIS|ASSUMPTION_CHALLENGE)
+      ;;
+    *)
+      echo "  ⚠ Invalid approachCategory: $approach_category"
+      echo "    Must be one of: PARAMETER_TUNING, ALGORITHM_CHANGE, DATA_PIPELINE, ARCHITECTURE, ERROR_ANALYSIS, ASSUMPTION_CHALLENGE"
+      return 1
+      ;;
+  esac
+
   # Extract suggestions (optional) - keep as string, may be JSON array
   local suggestions
-  suggestions=$(echo "$priority_block" | sed -n '/<suggestions>/,/<\/suggestions>/p' | sed '1d;$d' | tr -d '\n' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+  suggestions=$(extract_last_tag_content "$priority_block" "suggestions")
   # Default to empty array if not provided
   if [ -z "$suggestions" ]; then
     suggestions="[]"
