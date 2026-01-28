@@ -66,14 +66,14 @@ cd flowchart && npm run lint                  # lint check
 | `--verbose`, `-v` | Show detailed info during API calls (response lengths, exit codes, stderr) |
 | `--debug` | Write full debug log to `angainor-debug.log` (implies verbose) |
 | `--debug=FILE` | Write debug log to custom path |
-| `--timeout=SECS` | Set iteration timeout (default: 1800s objective, 600s PRD) |
+| `--timeout=SECS` | Set iteration timeout (default: 3600s/60min objective, 600s PRD) |
 | `--no-timeout` | Disable iteration timeout entirely |
 
 **When to use:**
 - **Empty responses**: Use `--verbose` to see what Claude is returning
 - **API errors**: Use `--verbose` to see the actual error patterns matched
 - **Full diagnosis**: Use `--debug` to capture everything for later analysis
-- **Long-running benchmarks**: Use `--timeout=3600` or `--no-timeout` for iterations that run ML inference
+- **Very long benchmarks**: Use `--timeout=7200` or `--no-timeout` for iterations over 60min
 
 ## Repository Structure
 
@@ -153,6 +153,18 @@ Each objective iteration MUST end with `<iteration>COMPLETE</iteration>` (or a t
 - `<metrics>{...}</metrics>` - Measurements from this experiment
 - `<iteration>COMPLETE</iteration>` - Normal iteration end
 - `<objective>SUCCESS|IMPOSSIBLE|PLATEAU</objective>` - Terminal states
+
+### Live Output (Objective Mode Default)
+Objective mode automatically enables `--live` output because:
+- Claude's `--print` mode buffers ALL output until the response completes
+- Objective mode often runs long benchmarks (10+ minutes)
+- Without live mode, empty response detection triggers before Claude finishes
+
+**Flags:**
+- `--live` - Enable streaming output (default for objective mode)
+- `--no-live` - Force `--print` mode (may timeout on long tasks)
+
+PRD mode still uses `--print` by default since tasks are typically faster.
 
 ### Plateau-Breaking Protocol (Objective Mode)
 When iterations show diminishing returns, the Plateau-Breaking Protocol forces approach diversity:

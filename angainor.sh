@@ -6,9 +6,16 @@
 
 set -e
 
+# Get script directory early (needed for --debug default path)
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
 # Parse command-line arguments
 MODE="prd"  # Default mode
 MAX_ITERATIONS=""
+VERBOSE=false
+DEBUG_LOG=""
+CLAUDE_TIMEOUT=""  # Will be set to default later if not specified
+LIVE_OUTPUT=false  # Show Claude output in real-time
 
 while [[ $# -gt 0 ]]; do
   case $1 in
@@ -20,13 +27,71 @@ while [[ $# -gt 0 ]]; do
       MODE="prd"
       shift
       ;;
+    --verbose|-v)
+      VERBOSE=true
+      shift
+      ;;
+    --debug)
+      # Enable debug logging to a file (implies verbose)
+      VERBOSE=true
+      DEBUG_LOG="$SCRIPT_DIR/angainor-debug.log"
+      shift
+      ;;
+    --debug=*)
+      # Enable debug logging to a specific file
+      VERBOSE=true
+      DEBUG_LOG="${1#*=}"
+      shift
+      ;;
+    --timeout=*)
+      # Set iteration timeout in seconds (default: 1800 for objective, 600 for PRD)
+      CLAUDE_TIMEOUT="${1#*=}"
+      shift
+      ;;
+    --no-timeout)
+      # Disable timeout entirely
+      CLAUDE_TIMEOUT="0"
+      shift
+      ;;
+    --live)
+      # Show Claude output in real-time (stream to terminal while capturing)
+      LIVE_OUTPUT=true
+      LIVE_OUTPUT_EXPLICIT=true
+      shift
+      ;;
+    --no-live)
+      # Force non-live mode (use --print, override objective mode default)
+      LIVE_OUTPUT=false
+      LIVE_OUTPUT_EXPLICIT=true
+      shift
+      ;;
+    --help|-h)
+      echo "Usage: ./angainor.sh [OPTIONS] [max_iterations]"
+      echo ""
+      echo "Options:"
+      echo "  --prd             Run in PRD mode (default)"
+      echo "  --objective       Run in Objective mode"
+      echo "  --timeout=SECS    Set iteration timeout (default: 1800s objective, 600s PRD)"
+      echo "  --no-timeout      Disable iteration timeout entirely"
+      echo "  --live            Stream Claude output in real-time (default for objective mode)"
+      echo "  --no-live         Force non-streaming mode (use --print, may timeout on long tasks)"
+      echo "  --verbose, -v     Enable verbose output for debugging"
+      echo "  --debug           Enable debug logging to angainor-debug.log"
+      echo "  --debug=FILE      Enable debug logging to specific file"
+      echo "  --help, -h        Show this help message"
+      echo ""
+      echo "Arguments:"
+      echo "  max_iterations    Maximum iterations to run (default: 10)"
+      exit 0
+      ;;
     *)
       # Assume it's the max_iterations number
       if [[ $1 =~ ^[0-9]+$ ]]; then
         MAX_ITERATIONS="$1"
       else
         echo "Error: Unknown argument '$1'"
-        echo "Usage: ./angainor.sh [--prd|--objective] [max_iterations]"
+        echo "Usage: ./angainor.sh [--prd|--objective] [--verbose] [max_iterations]"
+        echo "Use --help for more options."
         exit 1
       fi
       shift
@@ -37,13 +102,52 @@ done
 # Set default max iterations
 MAX_ITERATIONS=${MAX_ITERATIONS:-10}
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# Logging functions
+log_verbose() {
+  if [ "$VERBOSE" = true ]; then
+    echo "[VERBOSE] $*"
+  fi
+  if [ -n "$DEBUG_LOG" ]; then
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] [VERBOSE] $*" >> "$DEBUG_LOG"
+  fi
+}
+
+log_debug() {
+  if [ -n "$DEBUG_LOG" ]; then
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] [DEBUG] $*" >> "$DEBUG_LOG"
+  fi
+}
+
+log_error() {
+  echo "[ERROR] $*" >&2
+  if [ -n "$DEBUG_LOG" ]; then
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] [ERROR] $*" >> "$DEBUG_LOG"
+  fi
+}
+
+# Initialize debug log if enabled
+if [ -n "$DEBUG_LOG" ]; then
+  echo "" >> "$DEBUG_LOG"
+  echo "═══════════════════════════════════════════════════════" >> "$DEBUG_LOG"
+  echo "Angainor Debug Session Started: $(date)" >> "$DEBUG_LOG"
+  echo "Mode: $MODE" >> "$DEBUG_LOG"
+  echo "Max Iterations: $MAX_ITERATIONS" >> "$DEBUG_LOG"
+  echo "Working Directory: $(pwd)" >> "$DEBUG_LOG"
+  echo "═══════════════════════════════════════════════════════" >> "$DEBUG_LOG"
+fi
 
 # Set config and prompt files based on mode
 if [ "$MODE" = "objective" ]; then
   CONFIG_FILE="$SCRIPT_DIR/objective.json"
   PROMPT_FILE="$SCRIPT_DIR/objective-prompt.md"
   MODE_DISPLAY="OBJECTIVE"
+  # Objective mode defaults to live output because --print mode buffers ALL output
+  # until Claude completes, which doesn't work for long-running benchmarks.
+  # Users can override with --no-live if they really want --print mode.
+  if [ "$LIVE_OUTPUT_EXPLICIT" != true ] && [ "$LIVE_OUTPUT" = false ]; then
+    LIVE_OUTPUT=true
+    LIVE_OUTPUT_AUTO=true  # Track that this was auto-enabled
+  fi
 else
   CONFIG_FILE="$SCRIPT_DIR/prd.json"
   PROMPT_FILE="$SCRIPT_DIR/prompt.md"
@@ -121,6 +225,7 @@ restore_plugins() {
 # Track last response for error reporting
 LAST_CLAUDE_OUTPUT=""
 LAST_ITERATION=0
+CLAUDE_PID=""
 
 # Trap handler for cleanup on exit (normal, error, or interrupt)
 cleanup_on_exit() {
@@ -142,10 +247,33 @@ cleanup_on_exit() {
   exit $exit_code
 }
 
+# Interrupt handler - kill any running Claude process and clean up
+interrupt_handler() {
+  echo ""
+  echo "  ⚠ Interrupted by user (Ctrl+C)"
+
+  # Kill any running Claude process and its children
+  if [ -n "$CLAUDE_PID" ] && kill -0 "$CLAUDE_PID" 2>/dev/null; then
+    echo "  Terminating Claude process (PID: $CLAUDE_PID)..."
+    # Kill the entire process group
+    kill -TERM -"$CLAUDE_PID" 2>/dev/null || kill -TERM "$CLAUDE_PID" 2>/dev/null || true
+    sleep 1
+    # Force kill if still running
+    kill -KILL -"$CLAUDE_PID" 2>/dev/null || kill -KILL "$CLAUDE_PID" 2>/dev/null || true
+  fi
+
+  # Also kill any orphaned claude processes from this script
+  pkill -P $$ 2>/dev/null || true
+
+  restore_plugins
+  echo "  Angainor terminated."
+  exit 130  # Standard exit code for Ctrl+C
+}
+
 # Register cleanup traps - EXIT covers normal exit and set -e failures
-# SIGINT covers Ctrl+C interrupts
+# SIGINT/SIGTERM cover Ctrl+C and kill commands
 trap cleanup_on_exit EXIT
-trap 'trap - EXIT; cleanup_on_exit' INT
+trap interrupt_handler INT TERM
 
 # Print metrics summary on loop completion
 print_metrics_summary() {
@@ -494,19 +622,69 @@ print_objective_summary() {
 }
 
 # Check for SUCCESS termination in Objective mode
-# Arguments: output_text
+# Arguments: output_text, metrics_json (optional - for validation)
 # Returns: 0 if SUCCESS found (and state updated), 1 otherwise
 check_objective_success() {
   local output="$1"
+  local metrics="${2:-}"
 
   # Only run in objective mode
   if [ "$MODE" != "objective" ]; then
     return 1
   fi
 
-  # Check for <objective>SUCCESS</objective> signal
-  if ! echo "$output" | grep -qE "^[[:space:]]*<objective>SUCCESS</objective>[[:space:]]*$"; then
+  # IMPORTANT: Only check the TAIL of output for termination signals.
+  # The prompt file (displayed at start in script mode) contains example SUCCESS tags
+  # that would falsely match. Claude's actual response is at the END.
+  # Use last 5000 chars which is enough for any reasonable response tail.
+  local output_tail
+  output_tail=$(echo "$output" | tail -c 5000)
+
+  # Check for <objective>SUCCESS</objective> signal in the tail only
+  if ! echo "$output_tail" | grep -qE "^[[:space:]]*<objective>SUCCESS</objective>[[:space:]]*$"; then
     return 1
+  fi
+
+  # Warn if SUCCESS is signaled without metrics
+  if [ -z "$metrics" ] || [ "$metrics" = "{}" ] || [ "$metrics" = "null" ]; then
+    echo ""
+    echo "  ╔═══════════════════════════════════════════════════════"
+    echo "  ║ ⚠ WARNING: SUCCESS signaled without valid metrics!"
+    echo "  ╠═══════════════════════════════════════════════════════"
+    echo "  ║ This may indicate Claude didn't run the benchmark or"
+    echo "  ║ output was corrupted."
+    echo "  ║"
+
+    # Check if progress.txt was modified recently (within last 2 minutes)
+    if [ -f "$PROGRESS_FILE" ]; then
+      PROGRESS_MOD_TIME=$(stat -c %Y "$PROGRESS_FILE" 2>/dev/null || stat -f %m "$PROGRESS_FILE" 2>/dev/null || echo "0")
+      CURRENT_TIME=$(date +%s)
+      TIME_DIFF=$((CURRENT_TIME - PROGRESS_MOD_TIME))
+      if [ "$TIME_DIFF" -lt 120 ]; then
+        echo "  ║ progress.txt: Modified ${TIME_DIFF}s ago (OK)"
+      else
+        echo "  ║ progress.txt: NOT modified recently (${TIME_DIFF}s ago)"
+        echo "  ║   → Claude may not have done any work"
+      fi
+    else
+      echo "  ║ progress.txt: Does not exist"
+    fi
+
+    # Check transcript files
+    echo "  ║"
+    if [ -n "$TRANSCRIPT_FILE" ] && [ -f "$TRANSCRIPT_FILE" ]; then
+      TRANS_SIZE=$(wc -c < "$TRANSCRIPT_FILE" 2>/dev/null | tr -d ' ')
+      echo "  ║ Transcript: $TRANSCRIPT_FILE ($TRANS_SIZE bytes)"
+    fi
+    RAW_TRANSCRIPT="${TRANSCRIPT_FILE%.txt}.raw.txt"
+    if [ -f "$RAW_TRANSCRIPT" ]; then
+      RAW_SIZE=$(wc -c < "$RAW_TRANSCRIPT" 2>/dev/null | tr -d ' ')
+      echo "  ║ Raw transcript: $RAW_TRANSCRIPT ($RAW_SIZE bytes)"
+    fi
+    echo "  ║"
+    echo "  ║ Review the transcript files for what Claude actually output."
+    echo "  ╚═══════════════════════════════════════════════════════"
+    echo ""
   fi
 
   # Update objective.json status to 'success'
@@ -531,21 +709,26 @@ check_objective_impossible() {
     return 1
   fi
 
-  # Check for <objective>IMPOSSIBLE</objective> signal
-  if ! echo "$output" | grep -qE "^[[:space:]]*<objective>IMPOSSIBLE</objective>[[:space:]]*$"; then
+  # IMPORTANT: Only check the TAIL of output for termination signals.
+  # The prompt file contains example tags that would falsely match.
+  local output_tail
+  output_tail=$(echo "$output" | tail -c 5000)
+
+  # Check for <objective>IMPOSSIBLE</objective> signal in the tail only
+  if ! echo "$output_tail" | grep -qE "^[[:space:]]*<objective>IMPOSSIBLE</objective>[[:space:]]*$"; then
     return 1
   fi
 
-  # Extract reason from <reason>...</reason> block
+  # Extract reason from <reason>...</reason> block (use tail)
   local reason=""
-  if echo "$output" | grep -q "<reason>"; then
-    reason=$(echo "$output" | sed -n '/<reason>/,/<\/reason>/p' | sed '1d;$d' | tr '\n' ' ' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+  if echo "$output_tail" | grep -q "<reason>"; then
+    reason=$(echo "$output_tail" | sed -n '/<reason>/,/<\/reason>/p' | sed '1d;$d' | tr '\n' ' ' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
   fi
 
-  # Extract category from <category>...</category> block (technical|scope|resource)
+  # Extract category from <category>...</category> block (use tail)
   local category=""
-  if echo "$output" | grep -q "<category>"; then
-    category=$(echo "$output" | sed -n '/<category>/,/<\/category>/p' | sed '1d;$d' | tr -d '\n' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+  if echo "$output_tail" | grep -q "<category>"; then
+    category=$(echo "$output_tail" | sed -n '/<category>/,/<\/category>/p' | sed '1d;$d' | tr -d '\n' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
   fi
 
   # Update objective.json status to 'impossible' and store reason
@@ -575,21 +758,26 @@ check_objective_plateau() {
     return 1
   fi
 
-  # Check for <objective>PLATEAU</objective> signal
-  if ! echo "$output" | grep -qE "^[[:space:]]*<objective>PLATEAU</objective>[[:space:]]*$"; then
+  # IMPORTANT: Only check the TAIL of output for termination signals.
+  # The prompt file contains example tags that would falsely match.
+  local output_tail
+  output_tail=$(echo "$output" | tail -c 5000)
+
+  # Check for <objective>PLATEAU</objective> signal in the tail only
+  if ! echo "$output_tail" | grep -qE "^[[:space:]]*<objective>PLATEAU</objective>[[:space:]]*$"; then
     return 1
   fi
 
-  # Extract attempts from <attempts>...</attempts> block
+  # Extract attempts from <attempts>...</attempts> block (use tail)
   local attempts=""
-  if echo "$output" | grep -q "<attempts>"; then
-    attempts=$(echo "$output" | sed -n '/<attempts>/,/<\/attempts>/p' | sed '1d;$d' | tr '\n' ' ' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+  if echo "$output_tail" | grep -q "<attempts>"; then
+    attempts=$(echo "$output_tail" | sed -n '/<attempts>/,/<\/attempts>/p' | sed '1d;$d' | tr '\n' ' ' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
   fi
 
-  # Extract suggestion from <suggestion>...</suggestion> block
+  # Extract suggestion from <suggestion>...</suggestion> block (use tail)
   local suggestion=""
-  if echo "$output" | grep -q "<suggestion>"; then
-    suggestion=$(echo "$output" | sed -n '/<suggestion>/,/<\/suggestion>/p' | sed '1d;$d' | tr '\n' ' ' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+  if echo "$output_tail" | grep -q "<suggestion>"; then
+    suggestion=$(echo "$output_tail" | sed -n '/<suggestion>/,/<\/suggestion>/p' | sed '1d;$d' | tr '\n' ' ' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
   fi
 
   # Update objective.json status to 'plateau'
@@ -614,8 +802,13 @@ check_objective_max_iterations() {
     return 1
   fi
 
-  # Check for <objective>MAX_ITERATIONS</objective> signal
-  if ! echo "$output" | grep -qE "^[[:space:]]*<objective>MAX_ITERATIONS</objective>[[:space:]]*$"; then
+  # IMPORTANT: Only check the TAIL of output for termination signals.
+  # The prompt file contains example tags that would falsely match.
+  local output_tail
+  output_tail=$(echo "$output" | tail -c 5000)
+
+  # Check for <objective>MAX_ITERATIONS</objective> signal in the tail only
+  if ! echo "$output_tail" | grep -qE "^[[:space:]]*<objective>MAX_ITERATIONS</objective>[[:space:]]*$"; then
     return 1
   fi
 
@@ -808,25 +1001,48 @@ update_objective_metrics() {
 
   # Build the jq update expression
   local jq_expr
+  local jq_error
+  local jq_result
+
+  echo "    iteration=$iteration, primary_metric=$primary_metric"
+  echo "    current_best=$current_best, new_value=$new_value"
+  echo "    should_update_best=$should_update_best"
+  echo "    history_entry=$history_entry"
 
   if [ "$should_update_best" = "true" ]; then
     # Update iterations, append to history, AND update bestMetrics
     jq_expr='.status.iterations = ($iter | tonumber) | .status.metricHistory += [$entry] | .status.bestMetrics = $metrics'
-    jq --argjson iter "$iteration" \
+    echo "    Running jq with bestMetrics update..."
+    jq_error=$(jq --argjson iter "$iteration" \
        --argjson entry "$history_entry" \
        --argjson metrics "$metrics_json" \
        "$jq_expr" \
-       "$CONFIG_FILE" > "$CONFIG_FILE.tmp" && mv "$CONFIG_FILE.tmp" "$CONFIG_FILE"
+       "$CONFIG_FILE" 2>&1 > "$CONFIG_FILE.tmp")
+    jq_result=$?
+    if [ $jq_result -eq 0 ]; then
+      mv "$CONFIG_FILE.tmp" "$CONFIG_FILE"
+    else
+      echo "    jq error: $jq_error"
+      rm -f "$CONFIG_FILE.tmp"
+    fi
   else
     # Update iterations and append to history only
     jq_expr='.status.iterations = ($iter | tonumber) | .status.metricHistory += [$entry]'
-    jq --argjson iter "$iteration" \
+    echo "    Running jq without bestMetrics update..."
+    jq_error=$(jq --argjson iter "$iteration" \
        --argjson entry "$history_entry" \
        "$jq_expr" \
-       "$CONFIG_FILE" > "$CONFIG_FILE.tmp" && mv "$CONFIG_FILE.tmp" "$CONFIG_FILE"
+       "$CONFIG_FILE" 2>&1 > "$CONFIG_FILE.tmp")
+    jq_result=$?
+    if [ $jq_result -eq 0 ]; then
+      mv "$CONFIG_FILE.tmp" "$CONFIG_FILE"
+    else
+      echo "    jq error: $jq_error"
+      rm -f "$CONFIG_FILE.tmp"
+    fi
   fi
 
-  if [ $? -eq 0 ]; then
+  if [ $jq_result -eq 0 ]; then
     echo "  ✓ Updated objective.json: iteration=$iteration, bestUpdated=$should_update_best"
     return 0
   else
@@ -993,51 +1209,500 @@ fi
 # Configure Angainor profile (disable interfering plugins) before main loop
 configure_angainor_profile
 
-echo "Starting Angainor in $MODE_DISPLAY mode - Max iterations: $MAX_ITERATIONS"
+# Compute effective timeout for display
+if [ -z "$CLAUDE_TIMEOUT" ]; then
+  if [ "$MODE" = "objective" ]; then
+    EFFECTIVE_TIMEOUT="1800s (30 min, objective default)"
+  else
+    EFFECTIVE_TIMEOUT="600s (10 min, PRD default)"
+  fi
+elif [ "$CLAUDE_TIMEOUT" = "0" ]; then
+  EFFECTIVE_TIMEOUT="disabled"
+else
+  EFFECTIVE_TIMEOUT="${CLAUDE_TIMEOUT}s"
+fi
 
-for i in $(seq 1 $MAX_ITERATIONS); do
+echo "Starting Angainor in $MODE_DISPLAY mode - Max iterations: $MAX_ITERATIONS"
+if [ "$LIVE_OUTPUT" = true ]; then
+  if [ "$LIVE_OUTPUT_AUTO" = true ]; then
+    echo "Capture mode: script (auto - --print buffers too long for objective mode)"
+  else
+    echo "Live output: ENABLED (Claude output will stream to terminal)"
+  fi
+fi
+if [ "$VERBOSE" = true ]; then
+  echo "Verbose mode: ENABLED"
+  echo "Iteration timeout: $EFFECTIVE_TIMEOUT"
+  if [ -n "$DEBUG_LOG" ]; then
+    echo "Debug log: $DEBUG_LOG"
+  fi
+  log_verbose "Config file: $CONFIG_FILE"
+  log_verbose "Prompt file: $PROMPT_FILE"
+  log_verbose "Transcript dir: $TRANSCRIPT_DIR"
+
+  # Diagnostic checks
+  echo ""
+  echo "Diagnostic checks:"
+
+  # Check Claude CLI
+  if command -v claude &> /dev/null; then
+    CLAUDE_VERSION=$(claude --version 2>/dev/null | head -1 || echo "unknown")
+    echo "  ✓ Claude CLI found: $CLAUDE_VERSION"
+  else
+    echo "  ✗ Claude CLI not found in PATH"
+    log_error "Claude CLI not found"
+  fi
+
+  # Check config file
+  if [ -f "$CONFIG_FILE" ]; then
+    CONFIG_SIZE=$(wc -c < "$CONFIG_FILE" | tr -d ' ')
+    echo "  ✓ Config file: $CONFIG_FILE ($CONFIG_SIZE bytes)"
+    if ! jq '.' "$CONFIG_FILE" > /dev/null 2>&1; then
+      echo "    ⚠ Warning: Config file is not valid JSON"
+      log_error "Config file is not valid JSON"
+    fi
+  else
+    echo "  ✗ Config file missing: $CONFIG_FILE"
+  fi
+
+  # Check prompt file
+  if [ -f "$PROMPT_FILE" ]; then
+    PROMPT_SIZE=$(wc -c < "$PROMPT_FILE" | tr -d ' ')
+    PROMPT_LINES=$(wc -l < "$PROMPT_FILE" | tr -d ' ')
+    echo "  ✓ Prompt file: $PROMPT_FILE ($PROMPT_SIZE bytes, $PROMPT_LINES lines)"
+    # Warn if prompt file is very large (>50KB can cause issues)
+    if [ "$PROMPT_SIZE" -gt 50000 ]; then
+      echo "    ⚠ Warning: Prompt file is large (>50KB) - may cause slowness"
+    fi
+  else
+    echo "  ✗ Prompt file missing: $PROMPT_FILE"
+  fi
+
+  # Quick Claude CLI test (using pipe, not redirect - redirect has known issues)
+  echo "  Testing Claude CLI..."
+  QUICK_TEST=$(echo "say OK" | timeout 30 claude --print 2>&1 | head -1 || echo "FAILED")
+  if [ -n "$QUICK_TEST" ] && [ "$QUICK_TEST" != "FAILED" ]; then
+    echo "  ✓ Claude CLI: Responsive (via pipe)"
+  else
+    echo "  ✗ Claude CLI: Not responding (check authentication with 'claude doctor')"
+  fi
+
+  # Check timeout command
+  if command -v gtimeout &> /dev/null; then
+    echo "  ✓ Timeout: gtimeout (macOS coreutils)"
+  elif command -v timeout &> /dev/null; then
+    echo "  ✓ Timeout: timeout (Linux)"
+  else
+    echo "  ⚠ Timeout: not available (no timeout protection)"
+  fi
+
+  echo ""
+fi
+
+# For objective mode, continue from where we left off (resume support)
+# For PRD mode, always start at 1
+START_ITERATION=1
+if [ "$MODE" = "objective" ] && [ -f "$CONFIG_FILE" ]; then
+  COMPLETED_ITERATIONS=$(jq -r '.status.iterations // 0' "$CONFIG_FILE")
+  if [ "$COMPLETED_ITERATIONS" -gt 0 ]; then
+    START_ITERATION=$((COMPLETED_ITERATIONS + 1))
+    echo "Resuming from iteration $START_ITERATION (found $COMPLETED_ITERATIONS completed in objective.json)"
+  fi
+fi
+
+# Calculate effective max (START + MAX_ITERATIONS - 1, capped by config if set)
+EFFECTIVE_MAX=$((START_ITERATION + MAX_ITERATIONS - 1))
+if [ "$MODE" = "objective" ] && [ -f "$CONFIG_FILE" ]; then
+  CONFIG_MAX=$(jq -r '.stopping.maxIterations // 0' "$CONFIG_FILE")
+  if [ "$CONFIG_MAX" -gt 0 ] && [ "$CONFIG_MAX" -lt "$EFFECTIVE_MAX" ]; then
+    EFFECTIVE_MAX="$CONFIG_MAX"
+    echo "Capped at iteration $EFFECTIVE_MAX (from objective.json stopping.maxIterations)"
+  fi
+fi
+
+for i in $(seq $START_ITERATION $EFFECTIVE_MAX); do
   echo ""
   echo "═══════════════════════════════════════════════════════"
-  echo "  Angainor Iteration $i of $MAX_ITERATIONS"
+  echo "  Angainor Iteration $i of $EFFECTIVE_MAX"
   echo "═══════════════════════════════════════════════════════"
 
-  # Capture iteration start time for metrics
+  # Capture iteration start time for metrics and git checks
   ITERATION_START=$(date +%s)
+  ITERATION_START_TIME=$(date -d "@$ITERATION_START" '+%Y-%m-%d %H:%M:%S' 2>/dev/null || date -r "$ITERATION_START" '+%Y-%m-%d %H:%M:%S' 2>/dev/null || date '+%Y-%m-%d %H:%M:%S')
 
   # Generate transcript filename
   TIMESTAMP=$(date +%Y-%m-%d-%H-%M-%S)
   TRANSCRIPT_FILE="$TRANSCRIPT_DIR/$TIMESTAMP-iteration-$i.txt"
 
+  # For Objective mode: generate dynamic prompt with iteration context
+  if [ "$MODE" = "objective" ]; then
+    DYNAMIC_PROMPT_FILE=$(mktemp)
+
+    # Extract current status from objective.json
+    CURRENT_ITERATIONS=$(jq -r '.status.iterations // 0' "$CONFIG_FILE")
+    BEST_METRICS=$(jq -c '.status.bestMetrics // {}' "$CONFIG_FILE")
+    CURRENT_STATE=$(jq -r '.status.state // "pending"' "$CONFIG_FILE")
+    SUCCESS_CRITERIA=$(jq -r '.verification.successCriteria // ""' "$CONFIG_FILE")
+
+    # Create dynamic header with iteration context
+    cat > "$DYNAMIC_PROMPT_FILE" << DYNAMIC_HEADER
+# ⚠️ ITERATION $i - YOU MUST EXIT AFTER ONE EXPERIMENT
+
+**THIS IS ITERATION $i.** Previous iterations completed: $CURRENT_ITERATIONS
+**Best metrics so far:** $BEST_METRICS
+**Success criteria:** $SUCCESS_CRITERIA
+**Current state:** $CURRENT_STATE
+
+## YOUR ONE JOB THIS ITERATION:
+1. Read progress.txt to see what was tried
+2. Form ONE hypothesis
+3. Implement ONE change
+4. Run the benchmark
+5. Output <metrics>{...}</metrics>
+6. Output <iteration>COMPLETE</iteration>
+7. **STOP IMMEDIATELY - DO NOT CONTINUE**
+
+After outputting \`<iteration>COMPLETE</iteration>\`, angainor.sh will:
+- Parse your metrics
+- Update objective.json
+- Spawn iteration $((i + 1)) with fresh context
+
+**DO NOT run multiple experiments. DO NOT keep iterating. EXIT after ONE experiment.**
+
+---
+
+DYNAMIC_HEADER
+
+    # Append the static prompt content
+    cat "$PROMPT_FILE" >> "$DYNAMIC_PROMPT_FILE"
+
+    # Use dynamic prompt for this iteration
+    EFFECTIVE_PROMPT_FILE="$DYNAMIC_PROMPT_FILE"
+    log_verbose "Generated dynamic prompt with iteration $i context"
+  else
+    EFFECTIVE_PROMPT_FILE="$PROMPT_FILE"
+  fi
+
   # Run Claude with retry logic for transient API errors
   MAX_RETRIES=3
   RETRY_DELAY=5
-  CLAUDE_TIMEOUT=600  # 10 minutes per iteration
   CLAUDE_SUCCESS=false
+  ITERATION_SYNTHESIZED=false  # Flag for git-recovered iterations (skip verification)
+
+  # Set timeout: use CLI value, or default based on mode
+  # Objective mode gets longer default (30 min) since it often runs benchmarks
+  if [ -z "$CLAUDE_TIMEOUT" ]; then
+    if [ "$MODE" = "objective" ]; then
+      ITERATION_TIMEOUT=3600  # 60 minutes for objective mode (ML benchmarks often take 30-60 min)
+    else
+      ITERATION_TIMEOUT=600   # 10 minutes for PRD mode
+    fi
+  elif [ "$CLAUDE_TIMEOUT" = "0" ]; then
+    ITERATION_TIMEOUT=0  # No timeout
+  else
+    ITERATION_TIMEOUT="$CLAUDE_TIMEOUT"
+  fi
+
+  # Verbose: Log iteration details
+  log_verbose "Starting iteration $i"
+  log_verbose "Transcript file: $TRANSCRIPT_FILE"
+
+  # Debug: Log prompt file info
+  if [ -n "$DEBUG_LOG" ]; then
+    log_debug "Prompt file size: $(wc -c < "$PROMPT_FILE" | tr -d ' ') bytes"
+    log_debug "Prompt file lines: $(wc -l < "$PROMPT_FILE" | tr -d ' ') lines"
+    log_debug "Config file ($CONFIG_FILE):"
+    head -20 "$CONFIG_FILE" >> "$DEBUG_LOG" 2>&1 || echo "  (could not read)" >> "$DEBUG_LOG"
+  fi
 
   for retry in $(seq 1 $MAX_RETRIES); do
     echo "  Calling Claude API (attempt $retry/$MAX_RETRIES)..."
+    log_verbose "API call attempt $retry/$MAX_RETRIES at $(date '+%H:%M:%S')"
 
     # Run Claude with timeout protection to prevent hangs on crashed processes
     # Use gtimeout on macOS (from coreutils), timeout on Linux, or no timeout as fallback
-    if command -v gtimeout &> /dev/null; then
-      TIMEOUT_CMD="gtimeout --signal=KILL $CLAUDE_TIMEOUT"
+    # ITERATION_TIMEOUT=0 means no timeout
+    if [ "$ITERATION_TIMEOUT" = "0" ]; then
+      TIMEOUT_CMD=""  # No timeout requested
+    elif command -v gtimeout &> /dev/null; then
+      TIMEOUT_CMD="gtimeout --signal=KILL $ITERATION_TIMEOUT"
     elif command -v timeout &> /dev/null; then
-      TIMEOUT_CMD="timeout --signal=KILL $CLAUDE_TIMEOUT"
+      TIMEOUT_CMD="timeout --signal=KILL $ITERATION_TIMEOUT"
     else
       TIMEOUT_CMD=""  # No timeout available, run without
     fi
 
-    if [ -n "$TIMEOUT_CMD" ]; then
-      OUTPUT=$($TIMEOUT_CMD claude --dangerously-skip-permissions --print < "$PROMPT_FILE" 2>&1 | tee /dev/stderr "$TRANSCRIPT_FILE") || true
-    else
-      OUTPUT=$(claude --dangerously-skip-permissions --print < "$PROMPT_FILE" 2>&1 | tee /dev/stderr "$TRANSCRIPT_FILE") || true
+    log_verbose "Timeout command: ${TIMEOUT_CMD:-'(none - no timeout)'}"
+    log_verbose "Claude command: claude --dangerously-skip-permissions --print < $EFFECTIVE_PROMPT_FILE"
+
+    # Capture stderr separately for debugging
+    STDERR_FILE=$(mktemp)
+    STDOUT_FILE=$(mktemp)
+
+    echo "  [DEBUG] Temp files: stdout=$STDOUT_FILE, stderr=$STDERR_FILE"
+    echo "  [DEBUG] Prompt file: $EFFECTIVE_PROMPT_FILE ($(wc -c < "$EFFECTIVE_PROMPT_FILE" 2>/dev/null | tr -d ' ' || echo 'N/A') bytes)"
+
+    # Debug: Test if Claude CLI output capture works with same flags (first attempt only)
+    if [ "$retry" -eq 1 ]; then
+      echo "  [DEBUG] Pre-flight: Testing output capture mechanism..."
+      TEST_STDOUT=$(mktemp)
+      TEST_STDERR=$(mktemp)
+      echo "respond with OK only" | timeout 30 claude --dangerously-skip-permissions --print --output-format text > "$TEST_STDOUT" 2> "$TEST_STDERR" || true
+      sync 2>/dev/null || true
+      sleep 0.3
+      TEST_OUT_SIZE=$(wc -c < "$TEST_STDOUT" 2>/dev/null | tr -d ' ' || echo "0")
+      TEST_ERR_SIZE=$(wc -c < "$TEST_STDERR" 2>/dev/null | tr -d ' ' || echo "0")
+      echo "  [DEBUG] Pre-flight result: stdout=$TEST_OUT_SIZE bytes, stderr=$TEST_ERR_SIZE bytes"
+      if [ "$TEST_OUT_SIZE" -eq 0 ] && [ "$TEST_ERR_SIZE" -eq 0 ]; then
+        echo "  ⚠ Pre-flight: Output capture returned 0 bytes - may have capture issues"
+        # Try alternative capture to diagnose
+        ALT_OUT=$(echo "respond with OK" | timeout 30 claude --print 2>&1 || echo "")
+        echo "  [DEBUG] Alternative (2>&1): ${#ALT_OUT} chars"
+        if [ ${#ALT_OUT} -gt 0 ]; then
+          echo "  [DEBUG] Alternative works - issue is with file redirection"
+        fi
+      else
+        echo "  [DEBUG] Pre-flight: Output capture working"
+      fi
+      rm -f "$TEST_STDOUT" "$TEST_STDERR"
     fi
-    CLAUDE_EXIT_CODE=$?
+
+    # Run Claude and capture output to files for reliable capture
+    # Run in background to capture PID for interrupt handling
+    #
+    # NOTE: --print mode has issues with very long sessions (>30min) where
+    # "No messages returned" error occurs. Using --output-format json as fallback.
+    if [ "$LIVE_OUTPUT" = true ]; then
+      # Live mode: run Claude interactively (no --print) so output streams in real-time
+      # Use 'script' to capture terminal output for later processing
+      #
+      # NOTE: Without --print, Claude runs interactively showing progress.
+      # We use 'script' to capture the terminal output for later processing.
+      # The captured output will include ANSI codes and spinner artifacts.
+      #
+      # IMPORTANT: We must send /exit after the prompt to make Claude exit cleanly.
+      # Otherwise it waits for more input and the script hangs.
+
+      # Only show live output banner if explicitly requested (not auto-enabled)
+      if [ "$LIVE_OUTPUT_AUTO" != true ]; then
+        echo ""
+        echo "───────────────────────────────────────────────────────"
+        echo "  LIVE OUTPUT (Claude is working...)"
+        echo "  Press Ctrl+C to interrupt"
+        echo "───────────────────────────────────────────────────────"
+      fi
+
+      # Run Claude interactively with script capturing output
+      # -q = quiet, -e = return exit code, -c = command
+      # We send /exit after the prompt to ensure Claude exits when done
+      #
+      # When auto-enabled (objective mode), suppress terminal output (> /dev/null)
+      # When explicitly requested (--live), show output on terminal
+      if [ "$LIVE_OUTPUT_AUTO" = true ]; then
+        # Silent capture mode: use script for pseudo-TTY but don't show output
+        if [ -n "$TIMEOUT_CMD" ]; then
+          $TIMEOUT_CMD script -q -e -c "(cat '$EFFECTIVE_PROMPT_FILE'; echo ''; echo '/exit') | claude --dangerously-skip-permissions" "$STDOUT_FILE" > /dev/null 2> "$STDERR_FILE" &
+          CLAUDE_PID=$!
+        else
+          script -q -e -c "(cat '$EFFECTIVE_PROMPT_FILE'; echo ''; echo '/exit') | claude --dangerously-skip-permissions" "$STDOUT_FILE" > /dev/null 2> "$STDERR_FILE" &
+          CLAUDE_PID=$!
+        fi
+      else
+        # Interactive mode: show output on terminal while capturing
+        if [ -n "$TIMEOUT_CMD" ]; then
+          $TIMEOUT_CMD script -q -e -c "(cat '$EFFECTIVE_PROMPT_FILE'; echo ''; echo '/exit') | claude --dangerously-skip-permissions" "$STDOUT_FILE" 2> "$STDERR_FILE" &
+          CLAUDE_PID=$!
+        else
+          script -q -e -c "(cat '$EFFECTIVE_PROMPT_FILE'; echo ''; echo '/exit') | claude --dangerously-skip-permissions" "$STDOUT_FILE" 2> "$STDERR_FILE" &
+          CLAUDE_PID=$!
+        fi
+      fi
+    else
+      # Normal mode: capture to file only (no terminal output)
+      # Use stdbuf to disable output buffering if available (helps with capture issues)
+      UNBUF_CMD=""
+      if command -v stdbuf &> /dev/null; then
+        UNBUF_CMD="stdbuf -oL -eL"
+        log_verbose "Using stdbuf for unbuffered output"
+      fi
+
+      if [ -n "$TIMEOUT_CMD" ]; then
+        if [ -n "$UNBUF_CMD" ]; then
+          $TIMEOUT_CMD $UNBUF_CMD claude --dangerously-skip-permissions --print --output-format text < "$EFFECTIVE_PROMPT_FILE" > "$STDOUT_FILE" 2> "$STDERR_FILE" &
+        else
+          $TIMEOUT_CMD claude --dangerously-skip-permissions --print --output-format text < "$EFFECTIVE_PROMPT_FILE" > "$STDOUT_FILE" 2> "$STDERR_FILE" &
+        fi
+        CLAUDE_PID=$!
+      else
+        if [ -n "$UNBUF_CMD" ]; then
+          $UNBUF_CMD claude --dangerously-skip-permissions --print --output-format text < "$EFFECTIVE_PROMPT_FILE" > "$STDOUT_FILE" 2> "$STDERR_FILE" &
+        else
+          claude --dangerously-skip-permissions --print --output-format text < "$EFFECTIVE_PROMPT_FILE" > "$STDOUT_FILE" 2> "$STDERR_FILE" &
+        fi
+        CLAUDE_PID=$!
+      fi
+    fi
+
+    # Wait for Claude to complete (this allows interrupt signals to be caught)
+    # For live mode, use a polling loop with a grace period to handle hanging processes
+    echo "  [DEBUG] Waiting for Claude process (PID: $CLAUDE_PID)..."
+
+    if [ "$LIVE_OUTPUT" = true ]; then
+      # Polling wait with grace period for live mode
+      # The iteration timeout ($ITERATION_TIMEOUT) handles the main work period
+      # This grace period handles the case where Claude finished but script/pty hangs
+      GRACE_PERIOD=30  # seconds to wait after process appears done
+      POLL_INTERVAL=2
+      GRACE_START=""
+      LAST_SIZE=""
+
+      while kill -0 "$CLAUDE_PID" 2>/dev/null; do
+        # Check if stdout file has been stable (no changes) for a while
+        if [ -f "$STDOUT_FILE" ]; then
+          CURRENT_SIZE=$(wc -c < "$STDOUT_FILE" 2>/dev/null | tr -d ' ' || echo "0")
+
+          if [ -n "$LAST_SIZE" ] && [ "$CURRENT_SIZE" = "$LAST_SIZE" ]; then
+            # Output hasn't changed
+            if [ -z "$GRACE_START" ]; then
+              GRACE_START=$(date +%s)
+              log_verbose "Output stabilized, starting grace period ($GRACE_PERIOD s)"
+            else
+              ELAPSED=$(($(date +%s) - GRACE_START))
+              if [ $ELAPSED -ge $GRACE_PERIOD ]; then
+                echo "  ⚠ Process appears hung (no output for ${GRACE_PERIOD}s), terminating..."
+                kill -TERM "$CLAUDE_PID" 2>/dev/null || true
+                sleep 2
+                kill -KILL "$CLAUDE_PID" 2>/dev/null || true
+                break
+              fi
+            fi
+          else
+            # Output changed, reset grace period
+            GRACE_START=""
+            LAST_SIZE="$CURRENT_SIZE"
+          fi
+        fi
+        sleep $POLL_INTERVAL
+      done
+      wait "$CLAUDE_PID" 2>/dev/null || true
+      CLAUDE_EXIT_CODE=$?
+    else
+      # Normal mode: simple wait
+      wait "$CLAUDE_PID" 2>/dev/null || true
+      CLAUDE_EXIT_CODE=$?
+    fi
+
+    echo "  [DEBUG] Claude process completed with exit code: $CLAUDE_EXIT_CODE"
+    CLAUDE_PID=""  # Clear PID after completion
+
+    # Ensure filesystem buffers are flushed before reading output files
+    # This prevents race conditions where wait() returns but buffers aren't written
+    sync 2>/dev/null || true
+    sleep 0.5  # Brief pause to ensure file writes complete
+
+    # Show end of live output (only if explicitly requested, not auto-enabled)
+    if [ "$LIVE_OUTPUT" = true ] && [ "$LIVE_OUTPUT_AUTO" != true ]; then
+      echo ""
+      echo "───────────────────────────────────────────────────────"
+      echo "  END LIVE OUTPUT"
+      echo "───────────────────────────────────────────────────────"
+    fi
+
+    # Read captured output from files
+    echo "  [DEBUG] Reading captured output..."
+
+    # Debug: Check file existence and size before reading
+    if [ -f "$STDOUT_FILE" ]; then
+      STDOUT_SIZE_PRE=$(wc -c < "$STDOUT_FILE" 2>/dev/null | tr -d ' ' || echo "0")
+      echo "  [DEBUG] STDOUT file exists, size before read: $STDOUT_SIZE_PRE bytes"
+    else
+      echo "  [DEBUG] WARNING: STDOUT file does not exist: $STDOUT_FILE"
+    fi
+    if [ "$LIVE_OUTPUT" = true ]; then
+      # Strip terminal artifacts from script output (interactive mode includes lots of formatting)
+      # This includes:
+      # - ANSI CSI sequences: \x1b[...m (colors), \x1b[...H (cursor), etc.
+      # - ANSI OSC sequences: \x1b]...  (window titles, etc.)
+      # - Other escape sequences: \x1b(B, \x1b>, etc.
+      # - Control characters: backspace, carriage return, bells
+      # - Spinner artifacts that get overwritten
+      #
+      # IMPORTANT: Cursor movement codes carry semantic meaning in Claude's output:
+      # - Cursor-right (\x1b[1C, \x1b[2C) = SPACE between words
+      # - Cursor-down (\x1b[1B, \x1b[2B) = NEWLINE
+      # We must convert these to the appropriate characters, not just delete them.
+      # Example: "I'll\x1b[1Cstart\x1b[1Bnext" should become "I'll start\nnext"
+      OUTPUT=$(cat "$STDOUT_FILE" 2>/dev/null | \
+        sed 's/\x1b\[[0-9]*C/ /g' | \
+        sed 's/\x1b\[[0-9]*B/\n/g' | \
+        sed 's/\x1b\[[0-9;]*[a-zA-DFGHJKSTfm]//g' | \
+        sed 's/\x1b\][^\x07]*\x07//g' | \
+        sed 's/\x1b[()][AB012]//g' | \
+        sed 's/\x1b[>=]//g' | \
+        tr -d '\r\x07\x08' | \
+        sed 's/.*\r//g' | \
+        tr -s ' ' | \
+        sed '/^[[:space:]]*$/d' || echo "")
+    else
+      OUTPUT=$(cat "$STDOUT_FILE" 2>/dev/null || echo "")
+    fi
+    STDERR_CONTENT=$(cat "$STDERR_FILE" 2>/dev/null || echo "")
+    echo "  [DEBUG] Output captured: ${#OUTPUT} chars, stderr: ${#STDERR_CONTENT} chars"
+
+    # If stdout is empty but stderr has content, Claude may have output there
+    if [ ${#OUTPUT} -eq 0 ] && [ ${#STDERR_CONTENT} -gt 100 ]; then
+      echo "  [DEBUG] Stdout empty but stderr has content - checking if it's valid output..."
+      # Check if stderr contains iteration markers (output went to wrong stream)
+      if echo "$STDERR_CONTENT" | grep -q -E '<metrics>|<iteration>|<objective>'; then
+        echo "  [DEBUG] Found output markers in stderr, using stderr as output"
+        OUTPUT="$STDERR_CONTENT"
+      fi
+    fi
+
+    # Save both raw and processed output to transcript
+    # Raw output goes to .raw.txt, processed goes to the regular transcript
+    RAW_TRANSCRIPT_FILE="${TRANSCRIPT_FILE%.txt}.raw.txt"
+    cat "$STDOUT_FILE" > "$RAW_TRANSCRIPT_FILE" 2>/dev/null || true
+    echo "$OUTPUT" > "$TRANSCRIPT_FILE" 2>/dev/null || true
+    echo "  [DEBUG] Saved raw transcript: $RAW_TRANSCRIPT_FILE ($(wc -c < "$RAW_TRANSCRIPT_FILE" 2>/dev/null | tr -d ' ') bytes)"
+    echo "  [DEBUG] Saved processed transcript: $TRANSCRIPT_FILE ($(wc -c < "$TRANSCRIPT_FILE" 2>/dev/null | tr -d ' ') bytes)"
+
+    # Debug: Show file sizes
+    if [ -n "$DEBUG_LOG" ]; then
+      STDOUT_SIZE=$(wc -c < "$STDOUT_FILE" 2>/dev/null | tr -d ' ' || echo "0")
+      STDERR_SIZE=$(wc -c < "$STDERR_FILE" 2>/dev/null | tr -d ' ' || echo "0")
+      log_debug "STDOUT file size: $STDOUT_SIZE bytes"
+      log_debug "STDERR file size: $STDERR_SIZE bytes"
+    fi
+
+    rm -f "$STDERR_FILE" "$STDOUT_FILE"
+
+    # Verbose: Log response details
+    log_verbose "Claude exit code: $CLAUDE_EXIT_CODE"
+    log_verbose "Response length: ${#OUTPUT} characters"
+    log_verbose "Stderr length: ${#STDERR_CONTENT} characters"
+
+    if [ -n "$DEBUG_LOG" ]; then
+      log_debug "--- STDERR START ---"
+      echo "$STDERR_CONTENT" | head -50 >> "$DEBUG_LOG"
+      log_debug "--- STDERR END ---"
+      if [ ${#OUTPUT} -lt 500 ]; then
+        log_debug "--- STDOUT (full, < 500 chars) ---"
+        echo "$OUTPUT" >> "$DEBUG_LOG"
+        log_debug "--- STDOUT END ---"
+      else
+        log_debug "--- STDOUT (first 500 chars) ---"
+        echo "${OUTPUT:0:500}" >> "$DEBUG_LOG"
+        log_debug "--- STDOUT END ---"
+      fi
+    fi
 
     # Check for timeout (exit code 137 = killed by SIGKILL, 124 = timeout exit code)
     if [ -n "$TIMEOUT_CMD" ] && { [ "$CLAUDE_EXIT_CODE" -eq 137 ] || [ "$CLAUDE_EXIT_CODE" -eq 124 ]; }; then
       echo ""
-      echo "  ⚠ Claude process timed out after ${CLAUDE_TIMEOUT}s (attempt $retry/$MAX_RETRIES)"
+      echo "  ⚠ Claude process timed out after ${ITERATION_TIMEOUT}s (attempt $retry/$MAX_RETRIES)"
+      log_verbose "TIMEOUT: Exit code $CLAUDE_EXIT_CODE after ${ITERATION_TIMEOUT}s"
+      log_verbose "TIMEOUT: stderr=$STDERR_CONTENT"
       if [ "$retry" -lt "$MAX_RETRIES" ]; then
         echo "  Retrying in ${RETRY_DELAY}s..."
         sleep "$RETRY_DELAY"
@@ -1045,15 +1710,25 @@ for i in $(seq 1 $MAX_ITERATIONS); do
         continue
       else
         echo "  ✗ Max retries exceeded due to timeouts."
+        log_error "Max retries exceeded due to timeouts"
         record_metrics "failed" "TIMEOUT" "Process timed out after $MAX_RETRIES retries"
         continue 2
       fi
     fi
 
     # Check for transient API errors
-    if echo "$OUTPUT" | grep -qE "No messages returned|ECONNRESET|ETIMEDOUT|rate limit|503|502|504|unhandled.*promise|rejected.*reason"; then
+    # Note: "No messages returned" is handled separately above (long session bug)
+    if echo "$OUTPUT" | grep -qE "ECONNRESET|ETIMEDOUT|rate limit|503|502|504"; then
+      MATCHED_ERROR=$(echo "$OUTPUT" | grep -oE "ECONNRESET|ETIMEDOUT|rate limit|503|502|504" | head -1)
       echo ""
       echo "  ⚠ Transient API error detected (attempt $retry/$MAX_RETRIES)"
+      log_verbose "API ERROR: Matched pattern '$MATCHED_ERROR'"
+      log_verbose "API ERROR: Full output length: ${#OUTPUT} chars"
+      if [ "$VERBOSE" = true ]; then
+        echo "  Error pattern: $MATCHED_ERROR"
+        echo "  Response preview:"
+        echo "$OUTPUT" | head -20 | sed 's/^/    /'
+      fi
       if [ "$retry" -lt "$MAX_RETRIES" ]; then
         echo "  Retrying in ${RETRY_DELAY}s..."
         sleep "$RETRY_DELAY"
@@ -1061,6 +1736,7 @@ for i in $(seq 1 $MAX_ITERATIONS); do
         continue
       else
         echo "  ✗ Max retries exceeded. Saving error response."
+        log_error "Max retries exceeded for API error: $MATCHED_ERROR"
         echo ""
         echo "═══════════════════════════════════════════════════════"
         echo "  CLAUDE API ERROR - Last Response:"
@@ -1077,6 +1753,151 @@ for i in $(seq 1 $MAX_ITERATIONS); do
     if [ -z "$OUTPUT" ] || [ ${#OUTPUT} -lt 50 ]; then
       echo ""
       echo "  ⚠ Empty or minimal response (attempt $retry/$MAX_RETRIES)"
+      log_verbose "EMPTY RESPONSE: Output length: ${#OUTPUT} chars (threshold: 50)"
+      log_verbose "EMPTY RESPONSE: Exit code: $CLAUDE_EXIT_CODE"
+
+      # For Objective mode: Check if work was done despite empty output (Claude CLI bug)
+      if [ "$MODE" = "objective" ]; then
+        echo "  Checking if work was done despite missing output..."
+
+        # IMPORTANT: Wait for work to complete before checking git evidence
+        # Claude may have spawned long-running processes that are still doing work
+        # even though Claude's --print mode returned empty.
+        #
+        # Strategy: Poll for git activity. If new commits appear or files change,
+        # work is still happening. Wait until activity stops or timeout.
+        echo "  Monitoring for ongoing work (checking git activity)..."
+
+        ACTIVITY_TIMEOUT=1800  # 30 minutes max total wait
+        IDLE_THRESHOLD=60      # Consider work done after 60s of no changes
+        POLL_INTERVAL=10
+
+        ACTIVITY_START=$(date +%s)
+        LAST_ACTIVITY=$(date +%s)
+        LAST_COMMIT_COUNT=$(git rev-list --count HEAD 2>/dev/null || echo "0")
+        LAST_PROGRESS_HASH=$(md5sum "$PROGRESS_FILE" 2>/dev/null | cut -d' ' -f1 || echo "none")
+
+        while true; do
+          sleep $POLL_INTERVAL
+          NOW=$(date +%s)
+          ELAPSED=$((NOW - ACTIVITY_START))
+
+          # Check for timeout
+          if [ $ELAPSED -ge $ACTIVITY_TIMEOUT ]; then
+            echo "  ⚠ Activity monitoring timeout after ${ACTIVITY_TIMEOUT}s"
+            break
+          fi
+
+          # Check for new commits
+          CURRENT_COMMIT_COUNT=$(git rev-list --count HEAD 2>/dev/null || echo "0")
+          CURRENT_PROGRESS_HASH=$(md5sum "$PROGRESS_FILE" 2>/dev/null | cut -d' ' -f1 || echo "none")
+
+          if [ "$CURRENT_COMMIT_COUNT" != "$LAST_COMMIT_COUNT" ] || [ "$CURRENT_PROGRESS_HASH" != "$LAST_PROGRESS_HASH" ]; then
+            echo "    Activity detected at ${ELAPSED}s (commits: $LAST_COMMIT_COUNT→$CURRENT_COMMIT_COUNT)"
+            LAST_ACTIVITY=$NOW
+            LAST_COMMIT_COUNT="$CURRENT_COMMIT_COUNT"
+            LAST_PROGRESS_HASH="$CURRENT_PROGRESS_HASH"
+          fi
+
+          # Check if idle long enough
+          IDLE_TIME=$((NOW - LAST_ACTIVITY))
+          if [ $IDLE_TIME -ge $IDLE_THRESHOLD ]; then
+            echo "  No activity for ${IDLE_TIME}s, assuming work complete."
+            break
+          fi
+        done
+
+        # Check for git commits made during this iteration
+        RECENT_COMMITS=$(git log --oneline --since="$ITERATION_START_TIME" 2>/dev/null | head -5)
+
+        # Check if progress.txt was modified
+        PROGRESS_MODIFIED=""
+        if [ -f "$PROGRESS_FILE" ]; then
+          PROGRESS_MTIME=$(stat -c %Y "$PROGRESS_FILE" 2>/dev/null || stat -f %m "$PROGRESS_FILE" 2>/dev/null || echo "0")
+          if [ "$PROGRESS_MTIME" -gt "$ITERATION_START" ]; then
+            PROGRESS_MODIFIED="yes"
+          fi
+        fi
+
+        if [ -n "$RECENT_COMMITS" ] || [ "$PROGRESS_MODIFIED" = "yes" ]; then
+          echo ""
+          echo "  ✓ WORK WAS DONE - Claude CLI failed to capture output"
+          if [ -n "$RECENT_COMMITS" ]; then
+            echo "  Git commits found:"
+            echo "$RECENT_COMMITS" | sed 's/^/    /'
+          fi
+          if [ "$PROGRESS_MODIFIED" = "yes" ]; then
+            echo "  progress.txt was updated"
+          fi
+          echo ""
+          echo "  Synthesizing iteration completion..."
+
+          # Try to extract actual metrics from progress.txt
+          # Format in progress.txt: "**fixture_type_accuracy: 0.8571 → 0.9333 (+7.62%)**"
+          # We want to extract the "after" value (0.9333)
+          EXTRACTED_METRICS="{}"
+          if [ -f "$PROGRESS_FILE" ]; then
+            # Get the metrics we're tracking from objective.json
+            METRICS_TO_TRACK=$(jq -r '.verification.metricsToTrack // [] | .[]' "$CONFIG_FILE" 2>/dev/null)
+
+            # For each metric, try to find it in progress.txt
+            for metric in $METRICS_TO_TRACK; do
+              # Pattern: "metric_name: X → Y" - extract Y (the after value)
+              # Also handle "metric_name: Y" without arrow
+              METRIC_VALUE=$(tail -150 "$PROGRESS_FILE" | grep -oE "${metric}[^0-9]*[0-9]+\.[0-9]+ *→ *[0-9]+\.[0-9]+" | tail -1 | grep -oE '[0-9]+\.[0-9]+$' || echo "")
+              if [ -z "$METRIC_VALUE" ]; then
+                # Try pattern without arrow: "metric_name: Y"
+                METRIC_VALUE=$(tail -150 "$PROGRESS_FILE" | grep -oE "${metric}[^0-9]*[0-9]+\.[0-9]+" | tail -1 | grep -oE '[0-9]+\.[0-9]+' || echo "")
+              fi
+              if [ -n "$METRIC_VALUE" ]; then
+                EXTRACTED_METRICS=$(echo "$EXTRACTED_METRICS" | jq --arg k "$metric" --argjson v "$METRIC_VALUE" '. + {($k): $v}')
+                echo "    Extracted $metric: $METRIC_VALUE"
+              fi
+            done
+          fi
+
+          # If we couldn't extract any metrics, use a placeholder
+          if [ "$EXTRACTED_METRICS" = "{}" ]; then
+            EXTRACTED_METRICS='{"note": "metrics not found in progress.txt - manual review needed"}'
+            echo "    ⚠ Could not extract metrics from progress.txt"
+          fi
+
+          # Create synthetic output with actual metrics
+          OUTPUT="[Transcript lost due to Claude CLI --print bug - but work was done]
+
+## Evidence of work:
+Commits: $RECENT_COMMITS
+Progress updated: $PROGRESS_MODIFIED
+
+<metrics>
+$EXTRACTED_METRICS
+</metrics>
+
+<iteration>COMPLETE</iteration>"
+
+          # Write synthetic output to transcript file (STDOUT_FILE was already deleted)
+          echo "$OUTPUT" > "$TRANSCRIPT_FILE"
+          CLAUDE_SUCCESS=true
+          ITERATION_SYNTHESIZED=true  # Skip verification for git-recovered iterations
+          log_verbose "Synthesized successful iteration from git evidence"
+          break
+        fi
+      fi
+
+      if [ "$VERBOSE" = true ]; then
+        echo "  Output length: ${#OUTPUT} characters"
+        echo "  Exit code: $CLAUDE_EXIT_CODE"
+        if [ -n "$OUTPUT" ]; then
+          echo "  Response content:"
+          echo "$OUTPUT" | sed 's/^/    /'
+        else
+          echo "  Response content: (completely empty)"
+        fi
+        if [ -n "$STDERR_CONTENT" ]; then
+          echo "  Stderr content:"
+          echo "$STDERR_CONTENT" | head -20 | sed 's/^/    /'
+        fi
+      fi
       if [ "$retry" -lt "$MAX_RETRIES" ]; then
         echo "  Retrying in ${RETRY_DELAY}s..."
         sleep "$RETRY_DELAY"
@@ -1084,6 +1905,16 @@ for i in $(seq 1 $MAX_ITERATIONS); do
         continue
       else
         echo "  ✗ Max retries exceeded for empty response."
+        log_error "Max retries exceeded for empty response (${#OUTPUT} chars)"
+        if [ "$VERBOSE" = true ]; then
+          echo ""
+          echo "  Diagnostic info:"
+          echo "    - Prompt file exists: $([ -f "$EFFECTIVE_PROMPT_FILE" ] && echo "yes" || echo "NO")"
+          echo "    - Prompt file size: $(wc -c < "$EFFECTIVE_PROMPT_FILE" 2>/dev/null | tr -d ' ' || echo "N/A") bytes"
+          echo "    - Config file exists: $([ -f "$CONFIG_FILE" ] && echo "yes" || echo "NO")"
+          echo "    - Claude command: claude --dangerously-skip-permissions --print"
+          echo "    - Check if Claude CLI is authenticated: run 'claude doctor'"
+        fi
         record_metrics "failed" "EMPTY_RESPONSE" "Empty response after $MAX_RETRIES retries"
         continue 2
       fi
@@ -1091,11 +1922,14 @@ for i in $(seq 1 $MAX_ITERATIONS); do
 
     # Success - break out of retry loop
     CLAUDE_SUCCESS=true
+    log_verbose "API call successful on attempt $retry"
+    log_verbose "Response length: ${#OUTPUT} characters"
     break
   done
 
   if [ "$CLAUDE_SUCCESS" != "true" ]; then
     echo "Iteration $i failed due to API issues. Continuing to next iteration..."
+    log_verbose "Iteration $i failed - moving to next iteration"
     sleep 2
     continue
   fi
@@ -1132,9 +1966,12 @@ EOF
      '.transcripts += [{"file": $file, "timestamp": $ts, "iteration": ($iter|tonumber), "branch": $branch, "storyId": $story}]' \
      "$TRANSCRIPT_INDEX" > "$TRANSCRIPT_INDEX.tmp" && mv "$TRANSCRIPT_INDEX.tmp" "$TRANSCRIPT_INDEX"
 
+  echo "  [DEBUG] Starting post-iteration processing..."
+
   # Check for completion signal FIRST - if all stories are done, no verification needed
   # Use anchored grep to avoid false positives when Claude mentions the tag in prose
   # (e.g., "I will not output <promise>COMPLETE</promise>")
+  echo "  [DEBUG] Checking for PRD completion signal..."
   if echo "$OUTPUT" | grep -qE "^[[:space:]]*<promise>COMPLETE</promise>[[:space:]]*$"; then
     echo ""
     echo "Angainor completed all tasks!"
@@ -1146,28 +1983,39 @@ EOF
 
   # Verify that verification was provided (enforcement of US-003 requirement)
   # Accept either <verification> XML blocks OR ✅ checkmarks as valid verification
+  # Skip for synthesized iterations (recovered from git evidence)
+  # Skip for objective mode (uses <metrics> + <iteration>COMPLETE</iteration> instead)
+  echo "  [DEBUG] Starting verification checks (mode=$MODE)..."
   VERIFICATION_FAILED=false
   FAILURE_REASON=""
 
-  # Check if any verification exists (XML format or checkmark format)
-  # Note: grep -c outputs "0" AND exits 1 when no matches, so fallback must be outside $()
-  HAS_XML_VERIFICATION=$(echo "$OUTPUT" | grep -c "<verification>") || HAS_XML_VERIFICATION=0
-  HAS_CHECKMARK_VERIFICATION=$(echo "$OUTPUT" | grep -c "✅") || HAS_CHECKMARK_VERIFICATION=0
-
-  if [ "$HAS_XML_VERIFICATION" -eq 0 ] && [ "$HAS_CHECKMARK_VERIFICATION" -eq 0 ]; then
-    VERIFICATION_FAILED=true
-    FAILURE_REASON="Missing verification - story completion requires either <verification> blocks or ✅ checkmarks"
+  if [ "$ITERATION_SYNTHESIZED" = true ]; then
+    log_verbose "Skipping verification check for synthesized iteration (git evidence)"
+    echo "  ✓ Iteration recovered from git evidence - skipping verification"
+  elif [ "$MODE" = "objective" ]; then
+    # Objective mode uses <metrics> and <iteration>COMPLETE</iteration> signals, not <verification>
+    log_verbose "Skipping PRD verification check for objective mode"
   else
-    # Check for NOT_SATISFIED conclusions (XML format) or ❌ (checkmark format)
-    if echo "$OUTPUT" | grep -q "Conclusion: NOT_SATISFIED"; then
+    # Check if any verification exists (XML format or checkmark format)
+    # Note: grep -c outputs "0" AND exits 1 when no matches, so fallback must be outside $()
+    HAS_XML_VERIFICATION=$(echo "$OUTPUT" | grep -c "<verification>") || HAS_XML_VERIFICATION=0
+    HAS_CHECKMARK_VERIFICATION=$(echo "$OUTPUT" | grep -c "✅") || HAS_CHECKMARK_VERIFICATION=0
+
+    if [ "$HAS_XML_VERIFICATION" -eq 0 ] && [ "$HAS_CHECKMARK_VERIFICATION" -eq 0 ]; then
       VERIFICATION_FAILED=true
-      FAILURE_REASON="Verification failed - one or more criteria marked NOT_SATISFIED"
+      FAILURE_REASON="Missing verification - story completion requires either <verification> blocks or ✅ checkmarks"
+    else
+      # Check for NOT_SATISFIED conclusions (XML format) or ❌ (checkmark format)
+      if echo "$OUTPUT" | grep -q "Conclusion: NOT_SATISFIED"; then
+        VERIFICATION_FAILED=true
+        FAILURE_REASON="Verification failed - one or more criteria marked NOT_SATISFIED"
+      fi
+      if echo "$OUTPUT" | grep -q "❌"; then
+        VERIFICATION_FAILED=true
+        FAILURE_REASON="Verification failed - one or more criteria marked with ❌"
+      fi
     fi
-    if echo "$OUTPUT" | grep -q "❌"; then
-      VERIFICATION_FAILED=true
-      FAILURE_REASON="Verification failed - one or more criteria marked with ❌"
-    fi
-  fi
+  fi  # End of ITERATION_SYNTHESIZED check
 
   # If verification failed, log to transcript and skip counting this as success
   if [ "$VERIFICATION_FAILED" = true ]; then
@@ -1192,18 +2040,114 @@ EOF
   fi
 
   # Record successful iteration metrics
+  echo "  [DEBUG] Verification passed, recording metrics for story: $STORY_ID"
   record_metrics "success" "$STORY_ID" ""
+  echo "  [DEBUG] Metrics recorded, checking mode..."
 
-  # For Objective mode: extract metrics and update objective.json
+  # For Objective mode: check for iteration boundary signal and extract metrics
   if [ "$MODE" = "objective" ]; then
-    EXTRACTED_METRICS=$(extract_metrics "$OUTPUT")
-    if [ -n "$EXTRACTED_METRICS" ]; then
-      echo "  Extracted metrics: $EXTRACTED_METRICS"
+    echo ""
+    echo "═══════════════════════════════════════════════════════"
+    echo "  [Objective Mode Processing]"
+    echo "═══════════════════════════════════════════════════════"
+    echo "  Output length: ${#OUTPUT} chars"
+
+    # IMPORTANT: Use output tail for all tag checks to avoid matching prompt examples.
+    # The prompt file (displayed at start in script mode) contains example tags.
+    OUTPUT_TAIL=$(echo "$OUTPUT" | tail -c 5000)
+    OUTPUT_TAIL_LEN=${#OUTPUT_TAIL}
+    echo "  Using tail for tag checks: last $OUTPUT_TAIL_LEN chars"
+
+    # Quick scan for key markers (in tail only - avoids matching prompt examples)
+    HAS_SUCCESS=$(echo "$OUTPUT_TAIL" | grep -c "<objective>SUCCESS</objective>") || HAS_SUCCESS=0
+    HAS_METRICS_TAG=$(echo "$OUTPUT_TAIL" | grep -c "<metrics>") || HAS_METRICS_TAG=0
+    HAS_PROGRESS_UPDATE=$(echo "$OUTPUT_TAIL" | grep -c "progress.txt") || HAS_PROGRESS_UPDATE=0
+    echo "  Quick scan (tail only): SUCCESS=$HAS_SUCCESS, <metrics>=$HAS_METRICS_TAG, mentions progress.txt=$HAS_PROGRESS_UPDATE"
+
+    # Debug: Show first and last parts of output to help diagnose issues
+    if [ ${#OUTPUT} -gt 0 ]; then
+      echo ""
+      echo "  ┌─ First 300 chars (may be prompt) ───────────────────"
+      echo "$OUTPUT" | head -c 300 | sed 's/^/  │ /'
+      echo ""
+      echo "  └────────────────────────────────────────────────────"
+      echo ""
+      echo "  ┌─ Last 600 chars (Claude's response) ────────────────"
+      echo "$OUTPUT" | tail -c 600 | sed 's/^/  │ /'
+      echo ""
+      echo "  └────────────────────────────────────────────────────"
+    else
+      echo ""
+      echo "  ⚠ OUTPUT IS EMPTY! Claude returned no text."
+      echo "    Check the raw transcript file for terminal artifacts."
     fi
-    update_objective_metrics "$i" "$EXTRACTED_METRICS"
+    echo ""
+
+    # Check for iteration completion signal (required to properly bound iterations)
+    # Accept multiple formats (check TAIL only to avoid prompt examples):
+    #   - <iteration>COMPLETE</iteration> (preferred XML format)
+    #   - Just "COMPLETE" on its own line (Claude sometimes outputs this)
+    #   - Any termination signal (SUCCESS, IMPOSSIBLE, PLATEAU)
+    HAS_ITERATION_COMPLETE=$(echo "$OUTPUT_TAIL" | grep -cE "<iteration>COMPLETE</iteration>|<objective>(SUCCESS|IMPOSSIBLE|PLATEAU)</objective>|^[[:space:]]*COMPLETE[[:space:]]*$") || HAS_ITERATION_COMPLETE=0
+
+    if [ "$HAS_ITERATION_COMPLETE" -eq 0 ]; then
+      echo "  ⚠ ITERATION BOUNDARY MISSING"
+      echo "    Agent did not output COMPLETE or termination signal."
+      log_verbose "Missing iteration boundary signal"
+    else
+      echo "  ✓ Iteration boundary signal found"
+    fi
+
+    # Check for metrics block (in tail only)
+    HAS_METRICS_BLOCK=$(echo "$OUTPUT_TAIL" | grep -c "<metrics>") || HAS_METRICS_BLOCK=0
+    echo "  Has <metrics> block: $HAS_METRICS_BLOCK"
+
+    echo "  Extracting metrics..."
+    EXTRACTED_METRICS=$(extract_metrics "$OUTPUT_TAIL")
+    if [ -n "$EXTRACTED_METRICS" ] && [ "$EXTRACTED_METRICS" != "{}" ]; then
+      echo "  ✓ Extracted metrics from output: $EXTRACTED_METRICS"
+    else
+      echo "  ⚠ No metrics in output - trying to extract from progress.txt..."
+
+      # Fallback: extract metrics from progress.txt
+      EXTRACTED_METRICS="{}"
+      if [ -f "$PROGRESS_FILE" ]; then
+        METRICS_TO_TRACK=$(jq -r '.verification.metricsToTrack // [] | .[]' "$CONFIG_FILE" 2>/dev/null)
+        for metric in $METRICS_TO_TRACK; do
+          # Pattern: "metric_name: X → Y" - extract Y (the after value)
+          METRIC_VALUE=$(tail -150 "$PROGRESS_FILE" | grep -oE "${metric}[^0-9]*[0-9]+\.[0-9]+ *→ *[0-9]+\.[0-9]+" | tail -1 | grep -oE '[0-9]+\.[0-9]+$' || echo "")
+          if [ -z "$METRIC_VALUE" ]; then
+            # Try pattern without arrow: "metric_name: Y" or "metric_name=Y"
+            METRIC_VALUE=$(tail -150 "$PROGRESS_FILE" | grep -oE "${metric}[^0-9]*[0-9]+\.[0-9]+" | tail -1 | grep -oE '[0-9]+\.[0-9]+' || echo "")
+          fi
+          if [ -n "$METRIC_VALUE" ]; then
+            EXTRACTED_METRICS=$(echo "$EXTRACTED_METRICS" | jq --arg k "$metric" --argjson v "$METRIC_VALUE" '. + {($k): $v}')
+            echo "    Found $metric: $METRIC_VALUE in progress.txt"
+          fi
+        done
+      fi
+
+      if [ "$EXTRACTED_METRICS" != "{}" ]; then
+        echo "  ✓ Extracted metrics from progress.txt: $EXTRACTED_METRICS"
+      else
+        echo "  ⚠ Could not extract metrics from progress.txt either"
+        # Show last 500 chars of output for debugging
+        if [ ${#OUTPUT} -gt 0 ]; then
+          echo "  Output tail (last 500 chars):"
+          echo "$OUTPUT" | tail -c 500 | sed 's/^/    /'
+        fi
+      fi
+    fi
+
+    echo "  Updating objective.json..."
+    if update_objective_metrics "$i" "$EXTRACTED_METRICS"; then
+      echo "  ✓ objective.json updated"
+    else
+      echo "  ✗ Failed to update objective.json"
+    fi
 
     # Check for SUCCESS termination signal
-    if check_objective_success "$OUTPUT"; then
+    if check_objective_success "$OUTPUT" "$EXTRACTED_METRICS"; then
       record_metrics "success" "OBJECTIVE_SUCCESS" ""
       print_metrics_summary
       exit 0
@@ -1243,17 +2187,32 @@ EOF
       print_metrics_summary
       exit 4
     fi
+
+    echo "  [DEBUG] All termination checks passed - iteration will continue"
   fi
 
   # Extract skill candidates from iteration output (failures don't break loop)
+  echo "  [DEBUG] Checking for skill candidates..."
   write_skill_candidate "$OUTPUT" "$STORY_ID" || true
 
+  # Clean up dynamic prompt file if created
+  if [ -n "$DYNAMIC_PROMPT_FILE" ] && [ -f "$DYNAMIC_PROMPT_FILE" ]; then
+    rm -f "$DYNAMIC_PROMPT_FILE"
+    DYNAMIC_PROMPT_FILE=""
+  fi
+
+  echo ""
+  echo "  [DEBUG] Iteration $i complete - proceeding to next iteration in 2s..."
   echo "Iteration $i complete. Continuing..."
   sleep 2
 done
 
 echo ""
-echo "Angainor reached max iterations ($MAX_ITERATIONS) without completing all tasks."
+echo "Angainor completed iterations $START_ITERATION to $EFFECTIVE_MAX."
+if [ "$MODE" = "objective" ]; then
+  FINAL_ITERATIONS=$(jq -r '.status.iterations // 0' "$CONFIG_FILE" 2>/dev/null)
+  echo "Total objective iterations completed: $FINAL_ITERATIONS"
+fi
 echo "Check $PROGRESS_FILE for status."
 print_metrics_summary
 exit 1

@@ -49,6 +49,35 @@ The angainor loop will:
 - Spawn a FRESH Claude instance for the next experiment
 - The next instance will see your commit and progress.txt updates
 
+## ⛔ Data Integrity in ML/Evaluation Workflows
+
+**This section applies when working with train/test splits, ground truth, or benchmark data.**
+
+Using verification/ground truth data during model execution is **DATA LEAKAGE** - it invalidates all results and is equivalent to cheating on a test by looking at the answer key.
+
+### The Input/Verification Boundary
+
+| File Type | Purpose | When to Use |
+|-----------|---------|-------------|
+| **Input files** | Raw data the system would receive in production | Pipeline execution - this is what you're testing |
+| **Ground truth files** | Human-annotated correct answers | Verification ONLY - compare outputs AFTER pipeline runs |
+| **Intermediate files** | Human-extracted/curated portions | Training data OR verification, NEVER as pipeline input |
+
+### Common Data Leakage Patterns (DO NOT DO THESE)
+
+1. **Reading ground truth to "understand the format"** - The pipeline must discover formats from raw input
+2. **Using pre-extracted portions as input** - If humans extracted a schedule, the pipeline must extract it from raw docs
+3. **Hardcoding patterns found in ground truth** - Patterns must be learned from input, not memorized from answers
+4. **Changing benchmark to use easier files** - The benchmark must use production-realistic inputs
+
+### Self-Check Before Every Change
+
+Ask: "Would this change work if I had NEVER seen the ground truth?"
+- If YES → The change is valid
+- If NO → The change is data leakage and must be rejected
+
+**Any improvement achieved through data leakage is INVALID. If you discover a previous iteration introduced leakage, you must document it and revert those changes.**
+
 ## The Objective Mode Difference
 
 Unlike PRD mode (predefined tasks), Objective mode is **goal-driven**:
