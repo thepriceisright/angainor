@@ -1051,6 +1051,151 @@ update_objective_metrics() {
   fi
 }
 
+# Parse <set_priority> block from iteration output and write to objective.json
+# Arguments: output_text iteration_number
+# Returns: 0 if priority set (or none found), 1 on error
+parse_and_set_priority() {
+  local output="$1"
+  local iteration="$2"
+
+  # Only run in objective mode
+  if [ "$MODE" != "objective" ]; then
+    return 0
+  fi
+
+  # Check if <set_priority> block exists
+  if ! echo "$output" | grep -q "<set_priority>"; then
+    log_verbose "No <set_priority> block found"
+    return 0
+  fi
+
+  echo "  Parsing priority directive from output..."
+
+  # Extract each field from the <set_priority> block
+  local priority_block
+  priority_block=$(echo "$output" | sed -n '/<set_priority>/,/<\/set_priority>/p')
+
+  if [ -z "$priority_block" ]; then
+    echo "  ⚠ Malformed <set_priority> block"
+    return 1
+  fi
+
+  # Extract directive (required)
+  local directive
+  directive=$(echo "$priority_block" | sed -n '/<directive>/,/<\/directive>/p' | sed '1d;$d' | tr '\n' ' ' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+  if [ -z "$directive" ]; then
+    echo "  ⚠ <set_priority> missing required <directive> field"
+    return 1
+  fi
+
+  # Extract reason (required)
+  local reason
+  reason=$(echo "$priority_block" | sed -n '/<reason>/,/<\/reason>/p' | sed '1d;$d' | tr '\n' ' ' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+  if [ -z "$reason" ]; then
+    echo "  ⚠ <set_priority> missing required <reason> field"
+    return 1
+  fi
+
+  # Extract approachCategory (required)
+  local approach_category
+  approach_category=$(echo "$priority_block" | sed -n '/<approachCategory>/,/<\/approachCategory>/p' | sed '1d;$d' | tr -d '\n' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+  if [ -z "$approach_category" ]; then
+    echo "  ⚠ <set_priority> missing required <approachCategory> field"
+    return 1
+  fi
+
+  # Extract suggestions (optional) - keep as string, may be JSON array
+  local suggestions
+  suggestions=$(echo "$priority_block" | sed -n '/<suggestions>/,/<\/suggestions>/p' | sed '1d;$d' | tr -d '\n' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+  # Default to empty array if not provided
+  if [ -z "$suggestions" ]; then
+    suggestions="[]"
+  fi
+
+  # Validate suggestions is valid JSON array (or make it one)
+  if ! echo "$suggestions" | jq -e 'type == "array"' >/dev/null 2>&1; then
+    # Try to parse as-is, if not array wrap it
+    suggestions="[]"
+  fi
+
+  echo "    directive: $directive"
+  echo "    reason: $reason"
+  echo "    approachCategory: $approach_category"
+  echo "    suggestions: $suggestions"
+
+  # Write to objective.json
+  local jq_error
+  local jq_result
+  jq_error=$(jq \
+    --arg directive "$directive" \
+    --arg reason "$reason" \
+    --arg category "$approach_category" \
+    --argjson suggestions "$suggestions" \
+    --argjson iteration "$iteration" \
+    '.status.nextIterationPriority = {
+      directive: $directive,
+      reason: $reason,
+      approachCategory: $category,
+      suggestions: $suggestions,
+      setByIteration: $iteration
+    }' \
+    "$CONFIG_FILE" 2>&1 > "$CONFIG_FILE.tmp")
+  jq_result=$?
+
+  if [ $jq_result -eq 0 ]; then
+    mv "$CONFIG_FILE.tmp" "$CONFIG_FILE"
+    echo "  ✓ Priority directive set for next iteration"
+    return 0
+  else
+    echo "  ⚠ Failed to write priority to objective.json: $jq_error"
+    rm -f "$CONFIG_FILE.tmp"
+    return 1
+  fi
+}
+
+# Clear priority from objective.json if iteration responded to it
+# Arguments: output_text
+# Returns: 0 always
+clear_priority_if_responded() {
+  local output="$1"
+
+  # Only run in objective mode
+  if [ "$MODE" != "objective" ]; then
+    return 0
+  fi
+
+  # Check if there's an existing priority to clear
+  local has_priority
+  has_priority=$(jq -r '.status.nextIterationPriority // null' "$CONFIG_FILE")
+  if [ "$has_priority" = "null" ]; then
+    return 0
+  fi
+
+  # Check if output contains <priority_response> block
+  if ! echo "$output" | grep -q "<priority_response>"; then
+    echo "  ⚠ Priority directive exists but no <priority_response> in output"
+    return 0
+  fi
+
+  echo "  Clearing priority directive (iteration responded)..."
+
+  # Clear the priority
+  local jq_error
+  local jq_result
+  jq_error=$(jq '.status.nextIterationPriority = null' "$CONFIG_FILE" 2>&1 > "$CONFIG_FILE.tmp")
+  jq_result=$?
+
+  if [ $jq_result -eq 0 ]; then
+    mv "$CONFIG_FILE.tmp" "$CONFIG_FILE"
+    echo "  ✓ Priority directive cleared"
+  else
+    echo "  ⚠ Failed to clear priority: $jq_error"
+    rm -f "$CONFIG_FILE.tmp"
+  fi
+
+  return 0
+}
+
 # Extract and write skill candidate from iteration output
 # Arguments: output_text story_id
 # Returns: 0 if skill extracted, 1 if no skill or skipped
@@ -1344,6 +1489,36 @@ for i in $(seq $START_ITERATION $EFFECTIVE_MAX); do
     CURRENT_STATE=$(jq -r '.status.state // "pending"' "$CONFIG_FILE")
     SUCCESS_CRITERIA=$(jq -r '.verification.successCriteria // ""' "$CONFIG_FILE")
 
+    # Check for priority directive from previous iteration
+    PRIORITY_EXISTS=$(jq -r '.status.nextIterationPriority // null' "$CONFIG_FILE")
+    PRIORITY_SECTION=""
+    if [ "$PRIORITY_EXISTS" != "null" ]; then
+      PRIORITY_DIRECTIVE=$(jq -r '.status.nextIterationPriority.directive // ""' "$CONFIG_FILE")
+      PRIORITY_REASON=$(jq -r '.status.nextIterationPriority.reason // ""' "$CONFIG_FILE")
+      PRIORITY_CATEGORY=$(jq -r '.status.nextIterationPriority.approachCategory // ""' "$CONFIG_FILE")
+      PRIORITY_FROM=$(jq -r '.status.nextIterationPriority.setByIteration // "?"' "$CONFIG_FILE")
+      PRIORITY_SUGGESTIONS=$(jq -c '.status.nextIterationPriority.suggestions // []' "$CONFIG_FILE")
+
+      PRIORITY_SECTION="
+## ⚠️ PRIORITY DIRECTIVE FROM ITERATION $PRIORITY_FROM (MANDATORY)
+
+**YOU MUST ADDRESS THIS FIRST** before any other analysis.
+
+**Directive:** $PRIORITY_DIRECTIVE
+**Reason:** $PRIORITY_REASON
+**Approach Category:** $PRIORITY_CATEGORY
+**Suggestions:** $PRIORITY_SUGGESTIONS
+
+**Required action:**
+1. Output a \`<priority_response>\` block FIRST (before plateau check or hypothesis)
+2. Either ATTEMPT the directive (it becomes your hypothesis) or SKIP with documented reason
+3. Valid skip reasons: CONSTRAINT_VIOLATION, ALREADY_TRIED, SUPERSEDED
+
+**You may NOT ignore this directive. You must explicitly respond to it.**
+
+"
+    fi
+
     # Create dynamic header with iteration context
     cat > "$DYNAMIC_PROMPT_FILE" << DYNAMIC_HEADER
 # ⚠️ ITERATION $i - YOU MUST EXIT AFTER ONE EXPERIMENT
@@ -1352,7 +1527,7 @@ for i in $(seq $START_ITERATION $EFFECTIVE_MAX); do
 **Best metrics so far:** $BEST_METRICS
 **Success criteria:** $SUCCESS_CRITERIA
 **Current state:** $CURRENT_STATE
-
+$PRIORITY_SECTION
 ## YOUR ONE JOB THIS ITERATION:
 1. Read progress.txt to see what was tried
 2. Form ONE hypothesis
@@ -2081,6 +2256,12 @@ EOF
     else
       echo "  ✗ Failed to update objective.json"
     fi
+
+    # Handle priority directives:
+    # 1. Clear existing priority if iteration responded to it
+    # 2. Parse and set any new priority for next iteration
+    clear_priority_if_responded "$OUTPUT"
+    parse_and_set_priority "$OUTPUT" "$i"
 
     # Check for SUCCESS termination signal
     if check_objective_success "$OUTPUT" "$EXTRACTED_METRICS"; then

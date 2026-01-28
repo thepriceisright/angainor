@@ -27,6 +27,17 @@
     "state": "pending",
     "iterations": 0,
     "bestMetrics": {},
-    "metricHistory": []
+    "metricHistory": [],
+    "nextIterationPriority": null
+  },
+  "_comment_priority_example": {
+    "_description": "When an iteration sets a priority, it looks like this:",
+    "nextIterationPriority": {
+      "directive": "Try a different VL model for schedule extraction",
+      "reason": "Current model has API errors and poor accuracy on table extraction",
+      "approachCategory": "ALGORITHM_CHANGE",
+      "suggestions": ["gpt-4v", "gemini-pro-vision"],
+      "setByIteration": 7
+    }
   }
 }

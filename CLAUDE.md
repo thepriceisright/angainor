@@ -191,6 +191,38 @@ When iterations show diminishing returns, the Plateau-Breaking Protocol forces a
 
 See `objective-prompt.md` for the full protocol with XML output formats.
 
+### Priority Directive System (Objective Mode)
+Iterations can set mandatory priorities for the next iteration, ensuring important discoveries are acted upon:
+
+**Setting a priority** (current iteration):
+```xml
+<set_priority>
+  <directive>Try GPT-4V for schedule extraction</directive>
+  <reason>Current model has API errors and poor accuracy</reason>
+  <approachCategory>ALGORITHM_CHANGE</approachCategory>
+  <suggestions>["gpt-4v", "gemini-pro-vision"]</suggestions>
+</set_priority>
+```
+
+**Responding to a priority** (next iteration - MANDATORY):
+```xml
+<priority_response>
+  <action>ATTEMPTING|SKIPPING</action>
+  <directive>[The directive text]</directive>
+  <skip_reason>CONSTRAINT_VIOLATION|ALREADY_TRIED|SUPERSEDED</skip_reason>  <!-- only if SKIPPING -->
+  <response>[What you're doing or why you're skipping]</response>
+</priority_response>
+```
+
+**Key rules:**
+- Priority is stored in `status.nextIterationPriority` in objective.json
+- Next iteration MUST respond with `<priority_response>` before any other analysis
+- Valid skip reasons: `CONSTRAINT_VIOLATION`, `ALREADY_TRIED` (cite iteration), `SUPERSEDED`
+- If ATTEMPTING: the directive becomes the iteration's hypothesis
+- Priority is cleared after response (regardless of attempt or skip)
+
+See `objective-prompt.md` for full details.
+
 ### Angainor Profile
 angainor.sh configures a minimal plugin environment for autonomous runs:
 
@@ -320,7 +352,8 @@ Use `scripts/migrate-prd.sh [path/to/prd.json]` to migrate existing PRDs to the 
     "state": "pending",
     "iterations": 0,
     "bestMetrics": {},
-    "metricHistory": []
+    "metricHistory": [],
+    "nextIterationPriority": null
   }
 }
 ```
@@ -348,6 +381,7 @@ Use `scripts/migrate-prd.sh [path/to/prd.json]` to migrate existing PRDs to the 
 - `iterations`: Number of completed iterations
 - `bestMetrics`: Best values achieved for each tracked metric
 - `metricHistory`: Array of metrics from each iteration (for trend analysis)
+- `nextIterationPriority`: Priority directive for next iteration (see Priority Directive System above)
 
 ## Objective Mode Termination Conditions
 

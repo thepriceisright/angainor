@@ -26,14 +26,15 @@ After you complete ONE experiment:
 **You have ONE job: Run ONE experiment, then EXIT.**
 
 1. Read `objective.json` and `progress.txt` (check what's been tried)
-2. **Run Plateau-Breaking Protocol** (see below) - detect stagnation, determine escalation level
-3. Form ONE hypothesis using the appropriate escalation-level guidance
-4. Implement the change (minimal, focused - ONE thing)
-5. Run verification: `objective.verification.command`
-6. Output `<metrics>` block with results
-7. Commit: `exp: [Hypothesis] - [Result]`
-8. Append to `progress.txt` (include Approach Category and patterns learned)
-9. **Output `<iteration>COMPLETE</iteration>` and STOP**
+2. **If `status.nextIterationPriority` exists: Handle it FIRST** (see Priority Directive Handling below)
+3. **Run Plateau-Breaking Protocol** (see below) - detect stagnation, determine escalation level
+4. Form ONE hypothesis using the appropriate escalation-level guidance
+5. Implement the change (minimal, focused - ONE thing)
+6. Run verification: `objective.verification.command`
+7. Output `<metrics>` block with results
+8. Commit: `exp: [Hypothesis] - [Result]`
+9. Append to `progress.txt` (include Approach Category and patterns learned)
+10. **Output `<iteration>COMPLETE</iteration>` and STOP**
 
 **NEW: The Plateau-Breaking Protocol is MANDATORY** - it prevents getting stuck in local optima by forcing approach diversity when iterations stall.
 
@@ -48,6 +49,50 @@ The angainor loop will:
 - Update `objective.json` with your results
 - Spawn a FRESH Claude instance for the next experiment
 - The next instance will see your commit and progress.txt updates
+
+## Priority Directive Handling (MANDATORY)
+
+If `objective.json` contains `status.nextIterationPriority`, you **MUST** address it FIRST, before any other analysis:
+
+1. **Read the directive** from objective.json (also shown in the dynamic header above)
+2. **Output `<priority_response>`** before plateau check or hypothesis formation
+3. **Either ATTEMPT or SKIP** (with documented reason)
+
+### Response Format
+
+**If ATTEMPTING** (the priority directive becomes your hypothesis):
+```xml
+<priority_response>
+  <action>ATTEMPTING</action>
+  <directive>[Copy the directive text]</directive>
+  <response>[What specific approach you're taking to address it]</response>
+</priority_response>
+```
+
+**If SKIPPING** (must have valid reason):
+```xml
+<priority_response>
+  <action>SKIPPING</action>
+  <directive>[Copy the directive text]</directive>
+  <skip_reason>CONSTRAINT_VIOLATION|ALREADY_TRIED|SUPERSEDED</skip_reason>
+  <response>[Detailed explanation of why you cannot attempt this]</response>
+</priority_response>
+```
+
+### Valid Skip Reasons
+
+| Reason | When to Use |
+|--------|-------------|
+| `CONSTRAINT_VIOLATION` | Would violate a constraint in `objective.constraints` |
+| `ALREADY_TRIED` | This specific approach was already attempted (must cite iteration number and result) |
+| `SUPERSEDED` | An intervening iteration solved the underlying problem differently |
+
+### After Responding
+
+- **If ATTEMPTING:** The priority directive becomes your hypothesis for this iteration. Skip the normal hypothesis formation and proceed directly to implementation.
+- **If SKIPPING:** Proceed with normal Plateau-Breaking Protocol after documenting why.
+
+**⚠️ Ignoring a priority directive is NOT allowed.** You must explicitly respond with `<priority_response>` before proceeding.
 
 ## ⛔ Data Integrity in ML/Evaluation Workflows
 
@@ -485,13 +530,63 @@ Examples:
 ## Important
 
 - Each iteration is ONE experiment
-- **Run Plateau-Breaking Protocol FIRST** - check escalation level before forming hypothesis
+- **Handle priority directive FIRST** - if `status.nextIterationPriority` exists, respond to it before anything else
+- **Run Plateau-Breaking Protocol** - check escalation level before forming hypothesis (unless priority directive becomes your hypothesis)
 - Commit even negative results (learning is progress)
 - Read progress.txt thoroughly - extract patterns and anti-patterns, don't repeat failed approaches
 - **Track Approach Categories** - include in progress.txt for category rotation
 - Constraints are sacred - never violate them
 - **In PIVOT/REFRAME: switch categories, challenge assumptions** - incremental tweaks won't help
 - Signal termination when appropriate - don't waste iterations
+
+## Setting Priority for Next Iteration (Optional)
+
+If you discover something important that should be tried next but **cannot pursue it yourself** (due to the one-experiment-per-iteration rule), you can set a mandatory priority for the next iteration.
+
+### When to Set a Priority
+
+- You've identified a promising direction but already committed to a different experiment
+- Your experiment revealed that a specific approach should be tried next
+- You discovered a critical insight that requires a different approach category
+
+### Output Format
+
+Place this block **after** your `<metrics>` block but **before** `<iteration>COMPLETE</iteration>`:
+
+```xml
+<set_priority>
+  <directive>[Specific, actionable thing to try - be precise]</directive>
+  <reason>[Why this is important - what evidence led to this conclusion]</reason>
+  <approachCategory>[PARAMETER_TUNING|ALGORITHM_CHANGE|DATA_PIPELINE|ARCHITECTURE|ERROR_ANALYSIS|ASSUMPTION_CHALLENGE]</approachCategory>
+  <suggestions>[Optional JSON array of specific options, e.g., ["gpt-4v", "gemini-pro"]]</suggestions>
+</set_priority>
+```
+
+### Rules for Setting Priority
+
+1. **Be specific and actionable** - Not "try something different" but "try GPT-4V model for schedule extraction"
+2. **Include evidence** - Explain what you observed that led to this recommendation
+3. **Justify why you didn't try it** - You must have a valid reason (already did one experiment, different approach category needed, etc.)
+4. **One priority at a time** - New priority overwrites any existing one
+
+### Example
+
+```xml
+<metrics>
+{"fixture_type_accuracy": 0.33, "precision": 0.40, "recall": 0.28}
+</metrics>
+
+<set_priority>
+  <directive>Try GPT-4V or Gemini Pro Vision for schedule table extraction</directive>
+  <reason>Current Qwen model has 502/503 API errors and Claude Sonnet achieves only 33% accuracy. A different VL model architecture may perform better on structured table extraction.</reason>
+  <approachCategory>ALGORITHM_CHANGE</approachCategory>
+  <suggestions>["gpt-4v", "gemini-pro-vision", "claude-3-opus"]</suggestions>
+</set_priority>
+
+<iteration>COMPLETE</iteration>
+```
+
+The next iteration will be **required** to address this directive before forming its own hypothesis.
 
 ## MANDATORY: END EVERY ITERATION WITH THESE TAGS
 
