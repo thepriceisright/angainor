@@ -45,11 +45,35 @@ Angainor supports two distinct execution modes:
 # Run Angainor in Objective mode (from a project that has objective.json)
 ./angainor.sh --objective [max_iterations]
 
+# Debugging options
+./angainor.sh --objective --verbose 100     # Verbose output for debugging
+./angainor.sh --objective --debug 100       # Full debug logging to angainor-debug.log
+./angainor.sh --objective --debug=/path/to/file.log 100  # Custom debug log path
+
+# Help
+./angainor.sh --help                  # Show all options
+
 # Flowchart visualization (interactive React Flow diagram)
 cd flowchart && npm install && npm run dev    # dev server
 cd flowchart && npm run build                 # production build
 cd flowchart && npm run lint                  # lint check
 ```
+
+### Debugging Options
+
+| Flag | Description |
+|------|-------------|
+| `--verbose`, `-v` | Show detailed info during API calls (response lengths, exit codes, stderr) |
+| `--debug` | Write full debug log to `angainor-debug.log` (implies verbose) |
+| `--debug=FILE` | Write debug log to custom path |
+| `--timeout=SECS` | Set iteration timeout (default: 1800s objective, 600s PRD) |
+| `--no-timeout` | Disable iteration timeout entirely |
+
+**When to use:**
+- **Empty responses**: Use `--verbose` to see what Claude is returning
+- **API errors**: Use `--verbose` to see the actual error patterns matched
+- **Full diagnosis**: Use `--debug` to capture everything for later analysis
+- **Long-running benchmarks**: Use `--timeout=3600` or `--no-timeout` for iterations that run ML inference
 
 ## Repository Structure
 
@@ -114,10 +138,46 @@ Consolidate reusable patterns at the TOP of progress.txt in a `## Codebase Patte
 ### Completion Signal
 When all stories have `passes: true`, output: `<promise>COMPLETE</promise>`
 
-### Verification Enforcement
+### Verification Enforcement (PRD Mode)
 angainor.sh enforces that each iteration includes `<verification>` blocks before accepting story completion. If blocks are missing or contain `NOT_SATISFIED`, the iteration fails and doesn't count toward completion.
 
 Flexible verification: angainor.sh accepts either `<verification>` XML blocks OR ✅ checkmarks as valid verification evidence.
+
+### Iteration Boundaries (Objective Mode)
+Each objective iteration MUST end with `<iteration>COMPLETE</iteration>` (or a termination signal). This ensures:
+- ONE experiment per iteration (prevents runaway sessions)
+- Clean handoff to next fresh Claude instance
+- Proper metrics extraction before iteration ends
+
+**Required signals:**
+- `<metrics>{...}</metrics>` - Measurements from this experiment
+- `<iteration>COMPLETE</iteration>` - Normal iteration end
+- `<objective>SUCCESS|IMPOSSIBLE|PLATEAU</objective>` - Terminal states
+
+### Plateau-Breaking Protocol (Objective Mode)
+When iterations show diminishing returns, the Plateau-Breaking Protocol forces approach diversity:
+
+**Escalation Levels:**
+| Level | Trigger | Required Behavior |
+|-------|---------|-------------------|
+| EXPLORE | Normal state | Standard hypothesis formation |
+| PIVOT | 2+ iterations without significant improvement | Must try different approach category |
+| REFRAME | 4+ iterations stalled | Must challenge assumptions or problem framing |
+
+**Approach Categories** (every hypothesis must belong to one):
+- `PARAMETER_TUNING` - Adjust thresholds, hyperparameters, config values
+- `ALGORITHM_CHANGE` - Swap one method for a different one
+- `DATA_PIPELINE` - Change how input is processed, filtered, augmented
+- `ARCHITECTURE` - Structural changes to system design
+- `ERROR_ANALYSIS` - Deep-dive into failure cases to find root causes
+- `ASSUMPTION_CHALLENGE` - Question whether the problem is framed correctly
+
+**Key rules:**
+- In PIVOT/REFRAME: must select approach category NOT used in last 2 iterations
+- Each iteration logs its approach category to progress.txt for category rotation
+- Before signaling PLATEAU: must have tried at least 3 different categories
+
+See `objective-prompt.md` for the full protocol with XML output formats.
 
 ### Angainor Profile
 angainor.sh configures a minimal plugin environment for autonomous runs:
