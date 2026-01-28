@@ -1807,6 +1807,7 @@ DYNAMIC_HEADER
         sed 's/\x1b[>=]//g' | \
         tr -d '\r\x07\x08' | \
         sed 's/.*\r//g' | \
+        sed 's/[●✓✗✶✻✽✢·⎿▌▐▛▜▝▘❯]//g' | \
         tr -s ' ' | \
         sed '/^[[:space:]]*$/d' || echo "")
     else
