@@ -1211,18 +1211,24 @@ parse_and_set_priority() {
     return 0
   fi
 
-  # Check if <set_priority> block exists
-  if ! echo "$output" | grep -q "<set_priority>"; then
-    log_verbose "No <set_priority> block found"
+  # IMPORTANT: Only check the TAIL of output to avoid matching prompt template examples.
+  # The prompt file contains <set_priority> examples that would falsely match.
+  # Claude's actual response is at the END. Use last 5000 chars.
+  local output_tail
+  output_tail=$(echo "$output" | tail -c 5000)
+
+  # Check if <set_priority> block exists in the tail
+  if ! echo "$output_tail" | grep -q "<set_priority>"; then
+    log_verbose "No <set_priority> block found in output tail"
     return 0
   fi
 
   echo "  Parsing priority directive from output..."
 
-  # Extract ONLY THE LAST <set_priority> block (avoid template examples from prompt)
+  # Extract ONLY THE LAST <set_priority> block from the tail
   # Use awk to find the last complete block
   local priority_block
-  priority_block=$(echo "$output" | awk '
+  priority_block=$(echo "$output_tail" | awk '
     /<set_priority>/ { capture=1; block="" }
     capture { block = block $0 "\n" }
     /<\/set_priority>/ { capture=0; last_block=block }
@@ -1236,11 +1242,17 @@ parse_and_set_priority() {
 
   # Helper function to extract content between XML tags (gets LAST occurrence)
   # Handles both same-line <tag>content</tag> and multi-line formats
+  # Uses awk for proper multi-line matching (grep -oP doesn't cross newlines)
   extract_last_tag_content() {
     local text="$1"
     local tag="$2"
-    # Use grep -oP for Perl regex to extract content between tags, take last match
-    echo "$text" | grep -oP "(?<=<${tag}>).*?(?=</${tag}>)" | tail -1 | sed 's/^[[:space:]]*//;s/[[:space:]]*$//'
+    # Use awk to extract content between tags, handling multi-line content
+    # Preserves internal whitespace/newlines, trims leading/trailing whitespace
+    echo "$text" | awk -v tag="$tag" '
+      BEGIN { RS="</"tag">"; FS="<"tag">" }
+      NF > 1 { content = $2 }
+      END { gsub(/^[[:space:]]+|[[:space:]]+$/, "", content); print content }
+    '
   }
 
   # Extract directive (required)
@@ -1345,8 +1357,13 @@ clear_priority_if_responded() {
     return 0
   fi
 
-  # Check if output contains <priority_response> block
-  if ! echo "$output" | grep -q "<priority_response>"; then
+  # IMPORTANT: Only check the TAIL of output to avoid matching prompt template examples.
+  # The prompt file contains <priority_response> examples that would falsely match.
+  local output_tail
+  output_tail=$(echo "$output" | tail -c 5000)
+
+  # Check if output tail contains <priority_response> block
+  if ! echo "$output_tail" | grep -q "<priority_response>"; then
     echo "  ⚠ Priority directive exists but no <priority_response> in output"
     return 0
   fi
