@@ -2471,13 +2471,22 @@ EOF
     clear_priority_if_responded "$OUTPUT"
     parse_and_set_priority "$OUTPUT" "$i"
 
-    # If XML priority parsing didn't find anything, try LLM extraction result
-    if [ -n "$LLM_EXTRACTED" ] && echo "$LLM_EXTRACTED" | jq '.' >/dev/null 2>&1; then
-      LLM_PRIORITY=$(echo "$LLM_EXTRACTED" | jq -c '.priority_directive // null')
-      if [ "$LLM_PRIORITY" != "null" ]; then
-        # Check if we already have a priority set
-        EXISTING_PRIORITY=$(jq -r '.status.nextIterationPriority // null' "$CONFIG_FILE")
-        if [ "$EXISTING_PRIORITY" = "null" ]; then
+    # If XML priority parsing didn't find anything, try LLM extraction
+    # Note: LLM_EXTRACTED may be empty if XML metrics were found (LLM wasn't called for metrics)
+    # In that case, we need to call LLM specifically for priority extraction
+    EXISTING_PRIORITY=$(jq -r '.status.nextIterationPriority // null' "$CONFIG_FILE")
+    if [ "$EXISTING_PRIORITY" = "null" ]; then
+      # No priority set yet - try to extract from LLM
+
+      # If we don't have LLM extraction yet, call it now for priority
+      if [ -z "$LLM_EXTRACTED" ] && [ "$LLM_EXTRACTION" = true ] && [ -n "$OPENROUTER_API_KEY" ]; then
+        echo "  Calling LLM extraction for priority directive..."
+        LLM_EXTRACTED=$(extract_with_llm "$OUTPUT_TAIL" "$i" 2>&1) || true
+      fi
+
+      if [ -n "$LLM_EXTRACTED" ] && echo "$LLM_EXTRACTED" | jq '.' >/dev/null 2>&1; then
+        LLM_PRIORITY=$(echo "$LLM_EXTRACTED" | jq -c '.priority_directive // null')
+        if [ "$LLM_PRIORITY" != "null" ] && [ "$LLM_PRIORITY" != "{}" ]; then
           # Extract fields from LLM priority
           LLM_DIRECTIVE=$(echo "$LLM_PRIORITY" | jq -r '.directive // empty')
           LLM_REASON=$(echo "$LLM_PRIORITY" | jq -r '.reason // empty')
