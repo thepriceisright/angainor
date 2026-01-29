@@ -16,3 +16,6 @@ screenshots/
 
 # OS files
 .DS_Store
+
+# Test Files
+test_data/
