@@ -2423,6 +2423,10 @@ EOF
           EXTRACTED_METRICS="$LLM_METRICS"
           echo "  ✓ Extracted metrics via LLM: $EXTRACTED_METRICS"
         fi
+      else
+        # LLM extraction failed or returned invalid JSON - clear it so priority extraction can retry
+        log_verbose "LLM extraction returned invalid data, clearing LLM_EXTRACTED"
+        LLM_EXTRACTED=""
       fi
 
       # Fallback 2: Extract metrics from progress.txt
