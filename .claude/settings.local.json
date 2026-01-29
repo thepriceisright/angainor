@@ -135,7 +135,11 @@
       "Bash(claude --print:*)",
       "Bash(claude --dangerously-skip-permissions --print)",
       "Bash(printf:*)",
-      "Bash(bash:*)"
+      "Bash(bash:*)",
+      "Bash(# Check what''s in .env \\(just the key names, not values\\) cat /workspace/repos/claude-and-ralph/.env)",
+      "Bash(then)",
+      "Bash(else)",
+      "Bash(fi)"
     ]
   }
 }
