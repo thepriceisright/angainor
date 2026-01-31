@@ -1921,6 +1921,12 @@ DYNAMIC_HEADER
     # Run Claude and capture output to files for reliable capture
     # Run in background to capture PID for interrupt handling
     #
+    # IMPORTANT: We disable MCP servers for angainor runs to prevent:
+    # 1. MCP startup delays (can add 10+ seconds)
+    # 2. MCP failure errors blocking Claude startup
+    # 3. MCP servers interfering with automated operation
+    CLAUDE_MCP_FLAGS="--strict-mcp-config"
+
     # NOTE: --print mode has issues with very long sessions (>30min) where
     # "No messages returned" error occurs. Using --output-format json as fallback.
     if [ "$LIVE_OUTPUT" = true ]; then
@@ -1931,8 +1937,8 @@ DYNAMIC_HEADER
       # We use 'script' to capture the terminal output for later processing.
       # The captured output will include ANSI codes and spinner artifacts.
       #
-      # IMPORTANT: We must send /exit after the prompt to make Claude exit cleanly.
-      # Otherwise it waits for more input and the script hangs.
+      # IMPORTANT: We send /exit AFTER A DELAY to let Claude process the prompt first.
+      # Without the delay, Claude sees /exit before it starts responding and exits immediately.
 
       # Only show live output banner if explicitly requested (not auto-enabled)
       if [ "$LIVE_OUTPUT_AUTO" != true ]; then
@@ -1945,26 +1951,27 @@ DYNAMIC_HEADER
 
       # Run Claude interactively with script capturing output
       # -q = quiet, -e = return exit code, -c = command
-      # We send /exit after the prompt to ensure Claude exits when done
+      # We send /exit after a delay to ensure Claude processes the prompt first
       #
       # When auto-enabled (objective mode), suppress terminal output (> /dev/null)
       # When explicitly requested (--live), show output on terminal
       if [ "$LIVE_OUTPUT_AUTO" = true ]; then
         # Silent capture mode: use script for pseudo-TTY but don't show output
+        # The sleep before /exit gives Claude time to start processing before it sees the exit command
         if [ -n "$TIMEOUT_CMD" ]; then
-          $TIMEOUT_CMD script -q -e -c "(cat '$EFFECTIVE_PROMPT_FILE'; echo ''; echo '/exit') | claude --dangerously-skip-permissions" "$STDOUT_FILE" > /dev/null 2> "$STDERR_FILE" &
+          $TIMEOUT_CMD script -q -e -c "(cat '$EFFECTIVE_PROMPT_FILE'; sleep 5; echo ''; echo '/exit') | claude --dangerously-skip-permissions $CLAUDE_MCP_FLAGS" "$STDOUT_FILE" > /dev/null 2> "$STDERR_FILE" &
           CLAUDE_PID=$!
         else
-          script -q -e -c "(cat '$EFFECTIVE_PROMPT_FILE'; echo ''; echo '/exit') | claude --dangerously-skip-permissions" "$STDOUT_FILE" > /dev/null 2> "$STDERR_FILE" &
+          script -q -e -c "(cat '$EFFECTIVE_PROMPT_FILE'; sleep 5; echo ''; echo '/exit') | claude --dangerously-skip-permissions $CLAUDE_MCP_FLAGS" "$STDOUT_FILE" > /dev/null 2> "$STDERR_FILE" &
           CLAUDE_PID=$!
         fi
       else
         # Interactive mode: show output on terminal while capturing
         if [ -n "$TIMEOUT_CMD" ]; then
-          $TIMEOUT_CMD script -q -e -c "(cat '$EFFECTIVE_PROMPT_FILE'; echo ''; echo '/exit') | claude --dangerously-skip-permissions" "$STDOUT_FILE" 2> "$STDERR_FILE" &
+          $TIMEOUT_CMD script -q -e -c "(cat '$EFFECTIVE_PROMPT_FILE'; sleep 5; echo ''; echo '/exit') | claude --dangerously-skip-permissions $CLAUDE_MCP_FLAGS" "$STDOUT_FILE" 2> "$STDERR_FILE" &
           CLAUDE_PID=$!
         else
-          script -q -e -c "(cat '$EFFECTIVE_PROMPT_FILE'; echo ''; echo '/exit') | claude --dangerously-skip-permissions" "$STDOUT_FILE" 2> "$STDERR_FILE" &
+          script -q -e -c "(cat '$EFFECTIVE_PROMPT_FILE'; sleep 5; echo ''; echo '/exit') | claude --dangerously-skip-permissions $CLAUDE_MCP_FLAGS" "$STDOUT_FILE" 2> "$STDERR_FILE" &
           CLAUDE_PID=$!
         fi
       fi
@@ -1979,16 +1986,16 @@ DYNAMIC_HEADER
 
       if [ -n "$TIMEOUT_CMD" ]; then
         if [ -n "$UNBUF_CMD" ]; then
-          $TIMEOUT_CMD $UNBUF_CMD claude --dangerously-skip-permissions --print --output-format text < "$EFFECTIVE_PROMPT_FILE" > "$STDOUT_FILE" 2> "$STDERR_FILE" &
+          $TIMEOUT_CMD $UNBUF_CMD claude --dangerously-skip-permissions --print --output-format text $CLAUDE_MCP_FLAGS < "$EFFECTIVE_PROMPT_FILE" > "$STDOUT_FILE" 2> "$STDERR_FILE" &
         else
-          $TIMEOUT_CMD claude --dangerously-skip-permissions --print --output-format text < "$EFFECTIVE_PROMPT_FILE" > "$STDOUT_FILE" 2> "$STDERR_FILE" &
+          $TIMEOUT_CMD claude --dangerously-skip-permissions --print --output-format text $CLAUDE_MCP_FLAGS < "$EFFECTIVE_PROMPT_FILE" > "$STDOUT_FILE" 2> "$STDERR_FILE" &
         fi
         CLAUDE_PID=$!
       else
         if [ -n "$UNBUF_CMD" ]; then
-          $UNBUF_CMD claude --dangerously-skip-permissions --print --output-format text < "$EFFECTIVE_PROMPT_FILE" > "$STDOUT_FILE" 2> "$STDERR_FILE" &
+          $UNBUF_CMD claude --dangerously-skip-permissions --print --output-format text $CLAUDE_MCP_FLAGS < "$EFFECTIVE_PROMPT_FILE" > "$STDOUT_FILE" 2> "$STDERR_FILE" &
         else
-          claude --dangerously-skip-permissions --print --output-format text < "$EFFECTIVE_PROMPT_FILE" > "$STDOUT_FILE" 2> "$STDERR_FILE" &
+          claude --dangerously-skip-permissions --print --output-format text $CLAUDE_MCP_FLAGS < "$EFFECTIVE_PROMPT_FILE" > "$STDOUT_FILE" 2> "$STDERR_FILE" &
         fi
         CLAUDE_PID=$!
       fi
