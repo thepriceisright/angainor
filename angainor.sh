@@ -1362,10 +1362,54 @@ clear_priority_if_responded() {
   local output_tail
   output_tail=$(echo "$output" | tail -c 5000)
 
-  # Check if output tail contains <priority_response> block
-  if ! echo "$output_tail" | grep -q "<priority_response>"; then
-    echo "  ⚠ Priority directive exists but no <priority_response> in output"
+  # Check if output contains a priority response - either XML or plain text format
+  # XML format: <priority_response>...</priority_response>
+  # Plain text format: **Priority Directive Response**: ATTEMPTING|SKIPPING
+  #
+  # We check both:
+  # 1. output_tail (last 5000 chars) - safe zone, no prompt template
+  # 2. output after first 15000 chars - skips prompt template which contains examples
+  local has_xml_response=false
+  local has_text_response=false
+
+  # Skip first 15000 chars to avoid prompt template examples, then check remainder
+  local output_after_prompt
+  output_after_prompt=$(echo "$output" | tail -c +15001)
+
+  if echo "$output_tail" | grep -q "<priority_response>" || \
+     echo "$output_after_prompt" | grep -q "<priority_response>"; then
+    has_xml_response=true
+  fi
+
+  if echo "$output_tail" | grep -qE '\*\*Priority Directive Response\*\*:|Priority Directive Response:' || \
+     echo "$output_after_prompt" | grep -qE '\*\*Priority Directive Response\*\*:|Priority Directive Response:'; then
+    has_text_response=true
+  fi
+
+  # Fallback: Check progress.txt for priority response (agent may write there, not stdout)
+  local has_progress_response=false
+  if [ "$has_xml_response" = false ] && [ "$has_text_response" = false ]; then
+    if [ -f "$PROGRESS_FILE" ]; then
+      # Only check lines after the most recent iteration header to avoid matching previous iterations
+      # Iteration headers look like: "## 2026-01-30 - Objective Iteration N"
+      local current_iter_lines
+      current_iter_lines=$(tail -150 "$PROGRESS_FILE" | tac | sed '/^## .*Objective Iteration/q' | tac)
+      if echo "$current_iter_lines" | grep -qE '\*\*Priority Directive Response\*\*:|Priority Directive Response:'; then
+        has_progress_response=true
+        log_verbose "Found priority response in progress.txt (not in stdout)"
+      fi
+    fi
+  fi
+
+  if [ "$has_xml_response" = false ] && [ "$has_text_response" = false ] && [ "$has_progress_response" = false ]; then
+    echo "  ⚠ Priority directive exists but no response found in output or progress.txt"
     return 0
+  fi
+
+  if [ "$has_text_response" = true ] && [ "$has_xml_response" = false ]; then
+    log_verbose "Found plain-text priority response in stdout"
+  elif [ "$has_progress_response" = true ]; then
+    log_verbose "Found plain-text priority response in progress.txt"
   fi
 
   echo "  Clearing priority directive (iteration responded)..."
@@ -2514,6 +2558,63 @@ EOF
                }' "$CONFIG_FILE" > "$CONFIG_FILE.tmp" && mv "$CONFIG_FILE.tmp" "$CONFIG_FILE"
             echo "  ✓ Priority directive set from LLM extraction"
           fi
+        fi
+      fi
+
+      # Fallback: Try to extract priority from progress.txt "Next direction" section
+      # Re-check if priority is still null after LLM extraction
+      EXISTING_PRIORITY=$(jq -r '.status.nextIterationPriority // null' "$CONFIG_FILE")
+      if [ "$EXISTING_PRIORITY" = "null" ] && [ -f "$PROGRESS_FILE" ]; then
+        # Only use progress.txt if it was modified during this iteration (avoid stale priorities)
+        progress_mtime=$(stat -c %Y "$PROGRESS_FILE" 2>/dev/null || stat -f %m "$PROGRESS_FILE" 2>/dev/null || echo "0")
+        if [ "$progress_mtime" -le "$ITERATION_START" ]; then
+          log_verbose "Skipping progress.txt priority extraction - file not modified this iteration"
+        else
+          echo "  Checking progress.txt for 'Next direction' priority..."
+          # Look for "Next direction:" pattern in recent progress.txt entries
+          progress_tail=$(tail -100 "$PROGRESS_FILE")
+
+        # Extract the LAST "Next direction:" section (most recent iteration)
+        # Use awk to find the last block starting with "Next direction:"
+        next_direction=$(echo "$progress_tail" | awk '
+          /^Next direction:/ { if (capture) last_block=block; capture=1; block="" }
+          capture { block = block $0 "\n" }
+          /^---$/ { if (capture) last_block=block; capture=0 }
+          END { if (capture) printf "%s", block; else printf "%s", last_block }
+        ' | head -5)
+
+        if [ -n "$next_direction" ]; then
+          # Parse the directive (first bullet point after "Next direction:")
+          directive=$(echo "$next_direction" | grep -E "^- " | head -1 | sed 's/^- //')
+
+          if [ -n "$directive" ]; then
+            # Extract category if present (e.g., "DATA_PIPELINE: Description")
+            category=$(echo "$directive" | grep -oE '^(PARAMETER_TUNING|ALGORITHM_CHANGE|DATA_PIPELINE|ARCHITECTURE|ERROR_ANALYSIS|ASSUMPTION_CHALLENGE):' | tr -d ':')
+
+            # Remove category prefix from directive if present
+            if [ -n "$category" ]; then
+              directive=$(echo "$directive" | sed "s/^${category}: //")
+            else
+              category=""
+            fi
+
+            echo "  Setting priority from progress.txt..."
+            echo "    directive: $directive"
+            jq --arg d "$directive" \
+               --arg r "Extracted from progress.txt Next direction section" \
+               --arg c "$category" \
+               --argjson s "[]" \
+               --argjson iter "$i" \
+               '.status.nextIterationPriority = {
+                 directive: $d,
+                 reason: $r,
+                 approachCategory: $c,
+                 suggestions: $s,
+                 setByIteration: $iter
+               }' "$CONFIG_FILE" > "$CONFIG_FILE.tmp" && mv "$CONFIG_FILE.tmp" "$CONFIG_FILE"
+            echo "  ✓ Priority directive set from progress.txt"
+          fi
+        fi
         fi
       fi
     fi
