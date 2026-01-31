@@ -261,10 +261,16 @@ restore_plugins() {
 LAST_CLAUDE_OUTPUT=""
 LAST_ITERATION=0
 CLAUDE_PID=""
+FIFO_TO_CLEANUP=""  # FIFO path for live mode cleanup
 
 # Trap handler for cleanup on exit (normal, error, or interrupt)
 cleanup_on_exit() {
   local exit_code=$?
+
+  # Clean up FIFO if it exists
+  if [ -n "$FIFO_TO_CLEANUP" ] && [ -p "$FIFO_TO_CLEANUP" ]; then
+    rm -f "$FIFO_TO_CLEANUP" 2>/dev/null || true
+  fi
 
   # If exiting with error and we have a last response, print it
   if [ "$exit_code" -ne 0 ] && [ -n "$LAST_CLAUDE_OUTPUT" ]; then
@@ -286,6 +292,12 @@ cleanup_on_exit() {
 interrupt_handler() {
   echo ""
   echo "  ⚠ Interrupted by user (Ctrl+C)"
+
+  # Clean up FIFO if it exists
+  if [ -n "$FIFO_TO_CLEANUP" ] && [ -p "$FIFO_TO_CLEANUP" ]; then
+    rm -f "$FIFO_TO_CLEANUP" 2>/dev/null || true
+    FIFO_TO_CLEANUP=""
+  fi
 
   # Kill any running Claude process and its children
   if [ -n "$CLAUDE_PID" ] && kill -0 "$CLAUDE_PID" 2>/dev/null; then
@@ -1937,8 +1949,10 @@ DYNAMIC_HEADER
       # We use 'script' to capture the terminal output for later processing.
       # The captured output will include ANSI codes and spinner artifacts.
       #
-      # IMPORTANT: We send /exit AFTER A DELAY to let Claude process the prompt first.
-      # Without the delay, Claude sees /exit before it starts responding and exits immediately.
+      # IMPORTANT: We use a FIFO (named pipe) to control when /exit is sent.
+      # This allows us to wait until Claude has actually finished processing
+      # before sending /exit, avoiding the race condition where /exit arrives
+      # while Claude is still "Calculating...".
 
       # Only show live output banner if explicitly requested (not auto-enabled)
       if [ "$LIVE_OUTPUT_AUTO" != true ]; then
@@ -1949,33 +1963,118 @@ DYNAMIC_HEADER
         echo "───────────────────────────────────────────────────────"
       fi
 
-      # Run Claude interactively with script capturing output
-      # -q = quiet, -e = return exit code, -c = command
-      # We send /exit after a delay to ensure Claude processes the prompt first
-      #
-      # When auto-enabled (objective mode), suppress terminal output (> /dev/null)
-      # When explicitly requested (--live), show output on terminal
-      if [ "$LIVE_OUTPUT_AUTO" = true ]; then
-        # Silent capture mode: use script for pseudo-TTY but don't show output
-        # The sleep before /exit gives Claude time to start processing before it sees the exit command
-        if [ -n "$TIMEOUT_CMD" ]; then
-          $TIMEOUT_CMD script -q -e -c "(cat '$EFFECTIVE_PROMPT_FILE'; sleep 5; echo ''; echo '/exit') | claude --dangerously-skip-permissions $CLAUDE_MCP_FLAGS" "$STDOUT_FILE" > /dev/null 2> "$STDERR_FILE" &
-          CLAUDE_PID=$!
+      # Create a FIFO for controlled stdin delivery
+      # This allows us to send the prompt first, then /exit later
+      STDIN_FIFO=$(mktemp -u -t angainor-stdin.XXXXXX)
+      mkfifo "$STDIN_FIFO" || {
+        echo "  ✗ Failed to create FIFO, falling back to print mode"
+        LIVE_OUTPUT=false
+      }
+
+      if [ "$LIVE_OUTPUT" = true ]; then
+        # Clean up FIFO on exit (add to existing cleanup)
+        FIFO_TO_CLEANUP="$STDIN_FIFO"
+
+        # Run Claude interactively with script capturing output
+        # -q = quiet, -e = return exit code, -c = command
+        # Claude reads from FIFO, we control what goes in
+        if [ "$LIVE_OUTPUT_AUTO" = true ]; then
+          # Silent capture mode: use script for pseudo-TTY but don't show output
+          if [ -n "$TIMEOUT_CMD" ]; then
+            $TIMEOUT_CMD script -q -e -c "claude --dangerously-skip-permissions $CLAUDE_MCP_FLAGS < '$STDIN_FIFO'" "$STDOUT_FILE" > /dev/null 2> "$STDERR_FILE" &
+            CLAUDE_PID=$!
+          else
+            script -q -e -c "claude --dangerously-skip-permissions $CLAUDE_MCP_FLAGS < '$STDIN_FIFO'" "$STDOUT_FILE" > /dev/null 2> "$STDERR_FILE" &
+            CLAUDE_PID=$!
+          fi
         else
-          script -q -e -c "(cat '$EFFECTIVE_PROMPT_FILE'; sleep 5; echo ''; echo '/exit') | claude --dangerously-skip-permissions $CLAUDE_MCP_FLAGS" "$STDOUT_FILE" > /dev/null 2> "$STDERR_FILE" &
-          CLAUDE_PID=$!
+          # Interactive mode: show output on terminal while capturing
+          if [ -n "$TIMEOUT_CMD" ]; then
+            $TIMEOUT_CMD script -q -e -c "claude --dangerously-skip-permissions $CLAUDE_MCP_FLAGS < '$STDIN_FIFO'" "$STDOUT_FILE" 2> "$STDERR_FILE" &
+            CLAUDE_PID=$!
+          else
+            script -q -e -c "claude --dangerously-skip-permissions $CLAUDE_MCP_FLAGS < '$STDIN_FIFO'" "$STDOUT_FILE" 2> "$STDERR_FILE" &
+            CLAUDE_PID=$!
+          fi
         fi
-      else
-        # Interactive mode: show output on terminal while capturing
-        if [ -n "$TIMEOUT_CMD" ]; then
-          $TIMEOUT_CMD script -q -e -c "(cat '$EFFECTIVE_PROMPT_FILE'; sleep 5; echo ''; echo '/exit') | claude --dangerously-skip-permissions $CLAUDE_MCP_FLAGS" "$STDOUT_FILE" 2> "$STDERR_FILE" &
-          CLAUDE_PID=$!
-        else
-          script -q -e -c "(cat '$EFFECTIVE_PROMPT_FILE'; sleep 5; echo ''; echo '/exit') | claude --dangerously-skip-permissions $CLAUDE_MCP_FLAGS" "$STDOUT_FILE" 2> "$STDERR_FILE" &
-          CLAUDE_PID=$!
-        fi
+
+        # Open FIFO for writing (keeps it open so Claude doesn't see EOF)
+        exec 7>"$STDIN_FIFO"
+
+        # Send the prompt
+        cat "$EFFECTIVE_PROMPT_FILE" >&7
+        log_verbose "Prompt sent to Claude via FIFO"
+
+        # Monitor output and wait for completion before sending /exit
+        # Completion indicators:
+        # 1. <iteration>COMPLETE</iteration> - normal iteration end
+        # 2. <objective>SUCCESS|IMPOSSIBLE|PLATEAU</objective> - terminal states
+        # 3. Output stable for COMPLETION_WAIT seconds after seeing actual response
+        COMPLETION_WAIT=15  # seconds of stable output before assuming done
+        MIN_OUTPUT_SIZE=5000  # minimum output size to consider "has response" (prompt echo is ~3-4KB)
+        POLL_INTERVAL=2
+        STABLE_COUNT=0
+        LAST_SIZE=0
+        HAS_RESPONSE=false
+        EXIT_SENT=false
+
+        log_verbose "Monitoring output for completion (min size: $MIN_OUTPUT_SIZE, stable wait: ${COMPLETION_WAIT}s)"
+
+        while kill -0 "$CLAUDE_PID" 2>/dev/null && [ "$EXIT_SENT" = false ]; do
+          sleep $POLL_INTERVAL
+
+          # Get current output size
+          if [ -f "$STDOUT_FILE" ]; then
+            CURRENT_SIZE=$(wc -c < "$STDOUT_FILE" 2>/dev/null | tr -d ' ' || echo "0")
+          else
+            CURRENT_SIZE=0
+          fi
+
+          # Check if we have meaningful output (beyond just the prompt echo)
+          if [ "$CURRENT_SIZE" -gt "$MIN_OUTPUT_SIZE" ]; then
+            HAS_RESPONSE=true
+          fi
+
+          # Check for explicit completion markers (only after minimum output)
+          if [ "$HAS_RESPONSE" = true ] && [ -f "$STDOUT_FILE" ]; then
+            if grep -qE "<iteration>COMPLETE</iteration>|<objective>(SUCCESS|IMPOSSIBLE|PLATEAU)</objective>" "$STDOUT_FILE" 2>/dev/null; then
+              log_verbose "Completion marker found in output, sending /exit"
+              echo '' >&7
+              echo '/exit' >&7
+              EXIT_SENT=true
+              break
+            fi
+          fi
+
+          # Check for stable output (no growth)
+          if [ "$CURRENT_SIZE" -eq "$LAST_SIZE" ]; then
+            STABLE_COUNT=$((STABLE_COUNT + POLL_INTERVAL))
+            if [ "$HAS_RESPONSE" = true ] && [ "$STABLE_COUNT" -ge "$COMPLETION_WAIT" ]; then
+              log_verbose "Output stable for ${STABLE_COUNT}s with response, sending /exit"
+              echo '' >&7
+              echo '/exit' >&7
+              EXIT_SENT=true
+              break
+            fi
+          else
+            # Output changed, reset stable counter
+            STABLE_COUNT=0
+            LAST_SIZE=$CURRENT_SIZE
+            log_verbose "Output growing: $CURRENT_SIZE bytes (has_response=$HAS_RESPONSE)"
+          fi
+        done
+
+        # Close FIFO writer (this also signals EOF to Claude if /exit wasn't sent)
+        exec 7>&-
+
+        # Clean up FIFO
+        rm -f "$STDIN_FIFO" 2>/dev/null || true
+        FIFO_TO_CLEANUP=""
       fi
-    else
+    fi
+
+    # Fall through to print mode if live mode was disabled or FIFO failed
+    if [ "$LIVE_OUTPUT" != true ]; then
       # Normal mode: capture to file only (no terminal output)
       # Use stdbuf to disable output buffering if available (helps with capture issues)
       UNBUF_CMD=""
