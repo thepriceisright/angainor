@@ -793,15 +793,9 @@ check_objective_success() {
     return 1
   fi
 
-  # Warn if SUCCESS is signaled without metrics
+  # Validate SUCCESS - reject if no evidence Claude actually did work
   if [ -z "$metrics" ] || [ "$metrics" = "{}" ] || [ "$metrics" = "null" ]; then
-    echo ""
-    echo "  ╔═══════════════════════════════════════════════════════"
-    echo "  ║ ⚠ WARNING: SUCCESS signaled without valid metrics!"
-    echo "  ╠═══════════════════════════════════════════════════════"
-    echo "  ║ This may indicate Claude didn't run the benchmark or"
-    echo "  ║ output was corrupted."
-    echo "  ║"
+    local progress_modified_recently=false
 
     # Check if progress.txt was modified recently (within last 2 minutes)
     if [ -f "$PROGRESS_FILE" ]; then
@@ -809,28 +803,51 @@ check_objective_success() {
       CURRENT_TIME=$(date +%s)
       TIME_DIFF=$((CURRENT_TIME - PROGRESS_MOD_TIME))
       if [ "$TIME_DIFF" -lt 120 ]; then
-        echo "  ║ progress.txt: Modified ${TIME_DIFF}s ago (OK)"
-      else
-        echo "  ║ progress.txt: NOT modified recently (${TIME_DIFF}s ago)"
-        echo "  ║   → Claude may not have done any work"
+        progress_modified_recently=true
       fi
-    else
-      echo "  ║ progress.txt: Does not exist"
     fi
 
-    # Check transcript files
-    echo "  ║"
-    if [ -n "$TRANSCRIPT_FILE" ] && [ -f "$TRANSCRIPT_FILE" ]; then
-      TRANS_SIZE=$(wc -c < "$TRANSCRIPT_FILE" 2>/dev/null | tr -d ' ')
-      echo "  ║ Transcript: $TRANSCRIPT_FILE ($TRANS_SIZE bytes)"
+    # REJECT SUCCESS if no metrics AND progress.txt wasn't modified
+    # This catches false SUCCESS from prompt examples when Claude produces no output
+    if [ "$progress_modified_recently" = false ]; then
+      echo ""
+      echo "  ╔═══════════════════════════════════════════════════════"
+      echo "  ║ ✗ REJECTING FALSE SUCCESS SIGNAL"
+      echo "  ╠═══════════════════════════════════════════════════════"
+      echo "  ║ SUCCESS was signaled but evidence shows Claude didn't work:"
+      echo "  ║   - No valid metrics captured"
+      if [ -f "$PROGRESS_FILE" ]; then
+        echo "  ║   - progress.txt NOT modified recently (${TIME_DIFF}s ago)"
+      else
+        echo "  ║   - progress.txt does not exist"
+      fi
+      echo "  ║"
+      echo "  ║ This likely indicates:"
+      echo "  ║   - Claude exited without producing output"
+      echo "  ║   - SUCCESS tag matched from prompt examples (false positive)"
+      echo "  ║"
+      # Check transcript files for debugging
+      if [ -n "$TRANSCRIPT_FILE" ] && [ -f "$TRANSCRIPT_FILE" ]; then
+        TRANS_SIZE=$(wc -c < "$TRANSCRIPT_FILE" 2>/dev/null | tr -d ' ')
+        echo "  ║ Transcript: $TRANSCRIPT_FILE ($TRANS_SIZE bytes)"
+      fi
+      RAW_TRANSCRIPT="${TRANSCRIPT_FILE%.txt}.raw.txt"
+      if [ -f "$RAW_TRANSCRIPT" ]; then
+        RAW_SIZE=$(wc -c < "$RAW_TRANSCRIPT" 2>/dev/null | tr -d ' ')
+        echo "  ║ Raw transcript: $RAW_TRANSCRIPT ($RAW_SIZE bytes)"
+      fi
+      echo "  ╚═══════════════════════════════════════════════════════"
+      echo ""
+      return 1  # REJECT - don't accept this as SUCCESS
     fi
-    RAW_TRANSCRIPT="${TRANSCRIPT_FILE%.txt}.raw.txt"
-    if [ -f "$RAW_TRANSCRIPT" ]; then
-      RAW_SIZE=$(wc -c < "$RAW_TRANSCRIPT" 2>/dev/null | tr -d ' ')
-      echo "  ║ Raw transcript: $RAW_TRANSCRIPT ($RAW_SIZE bytes)"
-    fi
-    echo "  ║"
-    echo "  ║ Review the transcript files for what Claude actually output."
+
+    # SUCCESS with no metrics but progress.txt was modified - allow with warning
+    echo ""
+    echo "  ╔═══════════════════════════════════════════════════════"
+    echo "  ║ ⚠ WARNING: SUCCESS signaled without valid metrics!"
+    echo "  ╠═══════════════════════════════════════════════════════"
+    echo "  ║ Accepting because progress.txt was modified recently"
+    echo "  ║ (Claude did do work, metrics extraction may have failed)"
     echo "  ╚═══════════════════════════════════════════════════════"
     echo ""
   fi
@@ -864,6 +881,31 @@ check_objective_impossible() {
 
   # Check for <objective>IMPOSSIBLE</objective> signal in the tail only
   if ! echo "$output_tail" | grep -qE "^[[:space:]]*<objective>IMPOSSIBLE</objective>[[:space:]]*$"; then
+    return 1
+  fi
+
+  # Validate IMPOSSIBLE - reject if no evidence Claude actually did work
+  # (Can't determine objective is impossible without investigation)
+  local progress_modified_recently=false
+  if [ -f "$PROGRESS_FILE" ]; then
+    local mod_time cur_time time_diff
+    mod_time=$(stat -c %Y "$PROGRESS_FILE" 2>/dev/null || stat -f %m "$PROGRESS_FILE" 2>/dev/null || echo "0")
+    cur_time=$(date +%s)
+    time_diff=$((cur_time - mod_time))
+    if [ "$time_diff" -lt 120 ]; then
+      progress_modified_recently=true
+    fi
+  fi
+
+  if [ "$progress_modified_recently" = false ]; then
+    echo ""
+    echo "  ╔═══════════════════════════════════════════════════════"
+    echo "  ║ ✗ REJECTING FALSE IMPOSSIBLE SIGNAL"
+    echo "  ╠═══════════════════════════════════════════════════════"
+    echo "  ║ IMPOSSIBLE was signaled but progress.txt wasn't modified."
+    echo "  ║ This likely matched from prompt examples (false positive)."
+    echo "  ╚═══════════════════════════════════════════════════════"
+    echo ""
     return 1
   fi
 
@@ -913,6 +955,31 @@ check_objective_plateau() {
 
   # Check for <objective>PLATEAU</objective> signal in the tail only
   if ! echo "$output_tail" | grep -qE "^[[:space:]]*<objective>PLATEAU</objective>[[:space:]]*$"; then
+    return 1
+  fi
+
+  # Validate PLATEAU - reject if no evidence Claude actually did work
+  # (Can't determine plateau without multiple iterations of work)
+  local progress_modified_recently=false
+  if [ -f "$PROGRESS_FILE" ]; then
+    local mod_time cur_time time_diff
+    mod_time=$(stat -c %Y "$PROGRESS_FILE" 2>/dev/null || stat -f %m "$PROGRESS_FILE" 2>/dev/null || echo "0")
+    cur_time=$(date +%s)
+    time_diff=$((cur_time - mod_time))
+    if [ "$time_diff" -lt 120 ]; then
+      progress_modified_recently=true
+    fi
+  fi
+
+  if [ "$progress_modified_recently" = false ]; then
+    echo ""
+    echo "  ╔═══════════════════════════════════════════════════════"
+    echo "  ║ ✗ REJECTING FALSE PLATEAU SIGNAL"
+    echo "  ╠═══════════════════════════════════════════════════════"
+    echo "  ║ PLATEAU was signaled but progress.txt wasn't modified."
+    echo "  ║ This likely matched from prompt examples (false positive)."
+    echo "  ╚═══════════════════════════════════════════════════════"
+    echo ""
     return 1
   fi
 
