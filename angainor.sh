@@ -2112,6 +2112,7 @@ DYNAMIC_HEADER
       POLL_INTERVAL=2
       GRACE_START=""
       LAST_SIZE=""
+      GRACE_LOGGED=false  # Only log grace period start once
 
       while kill -0 "$CLAUDE_PID" 2>/dev/null; do
         # Check if stdout file has been stable (no changes) for a while
@@ -2122,7 +2123,11 @@ DYNAMIC_HEADER
             # Output hasn't changed
             if [ -z "$GRACE_START" ]; then
               GRACE_START=$(date +%s)
-              log_verbose "Output stabilized, starting grace period ($GRACE_PERIOD s)"
+              # Only log grace period start once to avoid spam
+              if [ "$GRACE_LOGGED" = false ]; then
+                log_verbose "Output stabilized, waiting up to ${GRACE_PERIOD}s before terminating hung process"
+                GRACE_LOGGED=true
+              fi
             else
               ELAPSED=$(($(date +%s) - GRACE_START))
               if [ $ELAPSED -ge $GRACE_PERIOD ]; then
@@ -2134,7 +2139,7 @@ DYNAMIC_HEADER
               fi
             fi
           else
-            # Output changed, reset grace period
+            # Output changed, reset grace period (but don't reset GRACE_LOGGED)
             GRACE_START=""
             LAST_SIZE="$CURRENT_SIZE"
           fi
