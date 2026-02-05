@@ -261,6 +261,7 @@ restore_plugins() {
 LAST_CLAUDE_OUTPUT=""
 LAST_ITERATION=0
 CLAUDE_PID=""
+TAIL_PID=""
 
 # Create empty MCP config to disable all MCP servers during Angainor runs
 # --strict-mcp-config alone no longer reliably disables MCP servers in CLI v2.1.31+
@@ -302,6 +303,11 @@ interrupt_handler() {
   # Clean up empty MCP config temp file
   if [ -n "$EMPTY_MCP_CONFIG" ] && [ -f "$EMPTY_MCP_CONFIG" ]; then
     rm -f "$EMPTY_MCP_CONFIG" 2>/dev/null || true
+  fi
+
+  # Kill tail -f process from live mode
+  if [ -n "$TAIL_PID" ]; then
+    kill "$TAIL_PID" 2>/dev/null || true
   fi
 
   # Kill any running Claude process and its children
@@ -1714,15 +1720,17 @@ if [ "$VERBOSE" = true ]; then
     echo "  ✓ Claude CLI found: $CLAUDE_VERSION"
     # Warn if CLI version is older than the minimum tested version
     CLAUDE_VER_NUM=$(echo "$CLAUDE_VERSION" | grep -oE '^[0-9]+\.[0-9]+\.[0-9]+' || echo "0.0.0")
-    CLAUDE_MAJOR=$(echo "$CLAUDE_VER_NUM" | cut -d. -f1)
-    CLAUDE_MINOR=$(echo "$CLAUDE_VER_NUM" | cut -d. -f2)
-    CLAUDE_PATCH=$(echo "$CLAUDE_VER_NUM" | cut -d. -f3)
-    MIN_VERSION="2.1.20"
-    if [ "$CLAUDE_MAJOR" -lt 2 ] 2>/dev/null || \
-       { [ "$CLAUDE_MAJOR" -eq 2 ] && [ "$CLAUDE_MINOR" -lt 1 ]; } 2>/dev/null || \
-       { [ "$CLAUDE_MAJOR" -eq 2 ] && [ "$CLAUDE_MINOR" -eq 1 ] && [ "$CLAUDE_PATCH" -lt 20 ]; } 2>/dev/null; then
-      echo "    ⚠ Warning: Claude CLI $CLAUDE_VER_NUM is older than recommended minimum ($MIN_VERSION)"
-      echo "    ⚠ Run 'claude update' or 'claude install' to update"
+    if [ "$CLAUDE_VER_NUM" != "0.0.0" ]; then
+      CLAUDE_MAJOR=$(echo "$CLAUDE_VER_NUM" | cut -d. -f1)
+      CLAUDE_MINOR=$(echo "$CLAUDE_VER_NUM" | cut -d. -f2)
+      CLAUDE_PATCH=$(echo "$CLAUDE_VER_NUM" | cut -d. -f3)
+      MIN_VERSION="2.1.20"
+      if [ "$CLAUDE_MAJOR" -lt 2 ] 2>/dev/null || \
+         { [ "$CLAUDE_MAJOR" -eq 2 ] && [ "$CLAUDE_MINOR" -lt 1 ]; } 2>/dev/null || \
+         { [ "$CLAUDE_MAJOR" -eq 2 ] && [ "$CLAUDE_MINOR" -eq 1 ] && [ "$CLAUDE_PATCH" -lt 20 ]; } 2>/dev/null; then
+        echo "    ⚠ Warning: Claude CLI $CLAUDE_VER_NUM is older than recommended minimum ($MIN_VERSION)"
+        echo "    ⚠ Run 'claude update' or 'claude install' to update"
+      fi
     fi
   else
     echo "  ✗ Claude CLI not found in PATH"
