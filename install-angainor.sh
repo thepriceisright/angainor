@@ -129,7 +129,7 @@ validate_claude_cli() {
     elif [ $smoke_exit -ne 0 ]; then
         log_error "Smoke test failed (exit code: $smoke_exit)"
         # Show first 3 lines of output for debugging
-        log_error "  Output: $(echo "$smoke_output" | head -3)"
+        log_error "  Output: $(echo "$smoke_output" | head -c 200)"
         if echo "$smoke_output" | grep -qi "auth\|login\|api.key\|unauthorized\|forbidden"; then
             log_error "  This looks like an authentication issue."
             log_error "  Run 'claude' interactively first to complete login."
