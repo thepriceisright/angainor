@@ -155,16 +155,13 @@ Each objective iteration MUST end with `<iteration>COMPLETE</iteration>` (or a t
 - `<objective>SUCCESS|IMPOSSIBLE|PLATEAU</objective>` - Terminal states
 
 ### Live Output (Objective Mode Default)
-Objective mode automatically enables `--live` output because:
-- Claude's `--print` mode buffers ALL output until the response completes
-- Objective mode often runs long benchmarks (10+ minutes)
-- Without live mode, empty response detection triggers before Claude finishes
+Both modes now use `--print` for reliability (the old `script`+FIFO mechanism was removed due to compatibility issues with Claude Code CLI v2.1.31+). The `--live` flag now controls whether output is shown on the terminal via `tail -f` while capturing.
+
+Objective mode still defaults to `--live` for visibility during long benchmarks. The generous timeout (60min default) handles long-running tasks.
 
 **Flags:**
-- `--live` - Enable streaming output (default for objective mode)
-- `--no-live` - Force `--print` mode (may timeout on long tasks)
-
-PRD mode still uses `--print` by default since tasks are typically faster.
+- `--live` - Show Claude output on terminal in real-time (default for objective mode)
+- `--no-live` - Capture output silently (default for PRD mode)
 
 ### Plateau-Breaking Protocol (Objective Mode)
 When iterations show diminishing returns, the Plateau-Breaking Protocol forces approach diversity:
@@ -244,9 +241,14 @@ When the agent doesn't output proper XML tags, angainor.sh uses an LLM (via Open
 - `--no-llm-extraction`: Disable LLM extraction (not recommended)
 
 ### Angainor Profile
-angainor.sh configures a minimal plugin environment for autonomous runs:
+angainor.sh configures a minimal environment for autonomous runs using two mechanisms:
 
-**Disabled plugins** (restored on exit):
+**Per-session CLI flags** (primary — no global state changes):
+- `--strict-mcp-config --mcp-config <empty>` - Disables all MCP servers
+- `--disable-slash-commands` - Disables all skills/slash commands
+- `--no-session-persistence` - Prevents session data from accumulating on disk
+
+**Disabled plugins** (secondary — restored on exit):
 - `automatic-code-review@claude-skillz` - Interferes with autonomous iteration flow
 - `explanatory-output-style@claude-plugins-official` - Adds unnecessary verbosity
 
@@ -255,10 +257,7 @@ angainor.sh configures a minimal plugin environment for autonomous runs:
 - `restore_plugins()` re-enables on exit (normal, Ctrl+C, or error)
 - Missing plugins are handled gracefully (no errors)
 
-**Minimum plugin set** (what remains enabled):
-- Core: Essential Claude Code functionality
-- Testing: Framework detection, test runners
-- Domain: Project-specific skills (prd, angainor, read-transcript)
+**Minimum CLI version:** 2.1.20+ (earlier versions may lack required flags)
 
 ### Headless Browser Testing
 The install script creates `.mcp.json` with Playwright configured for containerized environments:

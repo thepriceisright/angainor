@@ -261,15 +261,22 @@ restore_plugins() {
 LAST_CLAUDE_OUTPUT=""
 LAST_ITERATION=0
 CLAUDE_PID=""
-FIFO_TO_CLEANUP=""  # FIFO path for live mode cleanup
+TAIL_PID=""
+
+# Create empty MCP config to disable all MCP servers during Angainor runs
+# --strict-mcp-config alone no longer reliably disables MCP servers in CLI v2.1.31+
+# Plugin MCP servers (Figma, Linear, Playwright, etc.) would load otherwise, causing
+# startup delays, context pollution, and potential auth/connection errors.
+EMPTY_MCP_CONFIG=$(mktemp -t angainor-mcp.XXXXXX)
+echo '{"mcpServers":{}}' > "$EMPTY_MCP_CONFIG"
 
 # Trap handler for cleanup on exit (normal, error, or interrupt)
 cleanup_on_exit() {
   local exit_code=$?
 
-  # Clean up FIFO if it exists
-  if [ -n "$FIFO_TO_CLEANUP" ] && [ -p "$FIFO_TO_CLEANUP" ]; then
-    rm -f "$FIFO_TO_CLEANUP" 2>/dev/null || true
+  # Clean up empty MCP config temp file
+  if [ -n "$EMPTY_MCP_CONFIG" ] && [ -f "$EMPTY_MCP_CONFIG" ]; then
+    rm -f "$EMPTY_MCP_CONFIG" 2>/dev/null || true
   fi
 
   # If exiting with error and we have a last response, print it
@@ -293,10 +300,14 @@ interrupt_handler() {
   echo ""
   echo "  ⚠ Interrupted by user (Ctrl+C)"
 
-  # Clean up FIFO if it exists
-  if [ -n "$FIFO_TO_CLEANUP" ] && [ -p "$FIFO_TO_CLEANUP" ]; then
-    rm -f "$FIFO_TO_CLEANUP" 2>/dev/null || true
-    FIFO_TO_CLEANUP=""
+  # Clean up empty MCP config temp file
+  if [ -n "$EMPTY_MCP_CONFIG" ] && [ -f "$EMPTY_MCP_CONFIG" ]; then
+    rm -f "$EMPTY_MCP_CONFIG" 2>/dev/null || true
+  fi
+
+  # Kill tail -f process from live mode
+  if [ -n "$TAIL_PID" ]; then
+    kill "$TAIL_PID" 2>/dev/null || true
   fi
 
   # Kill any running Claude process and its children
@@ -1684,7 +1695,7 @@ fi
 echo "Starting Angainor in $MODE_DISPLAY mode - Max iterations: $MAX_ITERATIONS"
 if [ "$LIVE_OUTPUT" = true ]; then
   if [ "$LIVE_OUTPUT_AUTO" = true ]; then
-    echo "Capture mode: script (auto - --print buffers too long for objective mode)"
+    echo "Capture mode: print (auto-live - long timeout for objective mode)"
   else
     echo "Live output: ENABLED (Claude output will stream to terminal)"
   fi
@@ -1707,6 +1718,20 @@ if [ "$VERBOSE" = true ]; then
   if command -v claude &> /dev/null; then
     CLAUDE_VERSION=$(claude --version 2>/dev/null | head -1 || echo "unknown")
     echo "  ✓ Claude CLI found: $CLAUDE_VERSION"
+    # Warn if CLI version is older than the minimum tested version
+    CLAUDE_VER_NUM=$(echo "$CLAUDE_VERSION" | grep -oE '^[0-9]+\.[0-9]+\.[0-9]+' || echo "0.0.0")
+    if [ "$CLAUDE_VER_NUM" != "0.0.0" ]; then
+      CLAUDE_MAJOR=$(echo "$CLAUDE_VER_NUM" | cut -d. -f1)
+      CLAUDE_MINOR=$(echo "$CLAUDE_VER_NUM" | cut -d. -f2)
+      CLAUDE_PATCH=$(echo "$CLAUDE_VER_NUM" | cut -d. -f3)
+      MIN_VERSION="2.1.20"
+      if [ "$CLAUDE_MAJOR" -lt 2 ] 2>/dev/null || \
+         { [ "$CLAUDE_MAJOR" -eq 2 ] && [ "$CLAUDE_MINOR" -lt 1 ]; } 2>/dev/null || \
+         { [ "$CLAUDE_MAJOR" -eq 2 ] && [ "$CLAUDE_MINOR" -eq 1 ] && [ "$CLAUDE_PATCH" -lt 20 ]; } 2>/dev/null; then
+        echo "    ⚠ Warning: Claude CLI $CLAUDE_VER_NUM is older than recommended minimum ($MIN_VERSION)"
+        echo "    ⚠ Run 'claude update' or 'claude install' to update"
+      fi
+    fi
   else
     echo "  ✗ Claude CLI not found in PATH"
     log_error "Claude CLI not found"
@@ -1922,7 +1947,7 @@ DYNAMIC_HEADER
     fi
 
     log_verbose "Timeout command: ${TIMEOUT_CMD:-'(none - no timeout)'}"
-    log_verbose "Claude command: claude --dangerously-skip-permissions --print < $EFFECTIVE_PROMPT_FILE"
+    log_verbose "Claude command: claude --dangerously-skip-permissions --print $CLAUDE_CLI_FLAGS < $EFFECTIVE_PROMPT_FILE"
 
     # Capture stderr separately for debugging
     STDERR_FILE=$(mktemp)
@@ -1933,225 +1958,90 @@ DYNAMIC_HEADER
     # Run Claude and capture output to files for reliable capture
     # Run in background to capture PID for interrupt handling
     #
-    # IMPORTANT: We disable MCP servers for angainor runs to prevent:
-    # 1. MCP startup delays (can add 10+ seconds)
+    # IMPORTANT: We disable MCP servers and slash commands for angainor runs to prevent:
+    # 1. MCP startup delays (can add 10+ seconds per server)
     # 2. MCP failure errors blocking Claude startup
     # 3. MCP servers interfering with automated operation
-    CLAUDE_MCP_FLAGS="--strict-mcp-config"
+    # 4. Slash commands/skills consuming context and causing unexpected behavior
+    #
+    # NOTE: --strict-mcp-config alone no longer disables MCP in CLI v2.1.31+
+    # Must pair with --mcp-config pointing to an empty config file.
+    CLAUDE_CLI_FLAGS="--strict-mcp-config --mcp-config $EMPTY_MCP_CONFIG --disable-slash-commands"
 
-    # NOTE: --print mode has issues with very long sessions (>30min) where
-    # "No messages returned" error occurs. Using --output-format json as fallback.
-    if [ "$LIVE_OUTPUT" = true ]; then
-      # Live mode: run Claude interactively (no --print) so output streams in real-time
-      # Use 'script' to capture terminal output for later processing
-      #
-      # NOTE: Without --print, Claude runs interactively showing progress.
-      # We use 'script' to capture the terminal output for later processing.
-      # The captured output will include ANSI codes and spinner artifacts.
-      #
-      # IMPORTANT: We use a FIFO (named pipe) to control when /exit is sent.
-      # This allows us to wait until Claude has actually finished processing
-      # before sending /exit, avoiding the race condition where /exit arrives
-      # while Claude is still "Calculating...".
+    # All modes now use --print for reliability. The old live mode used 'script' to
+    # create a pseudo-TTY for interactive Claude, but this hangs with CLI v2.1.31+.
+    # --print mode is reliable and the generous timeout (60min for objective mode)
+    # handles long-running benchmarks.
+    #
+    # For explicit --live mode, we optionally tail the output file to show progress.
 
-      # Only show live output banner if explicitly requested (not auto-enabled)
-      if [ "$LIVE_OUTPUT_AUTO" != true ]; then
-        echo ""
-        echo "───────────────────────────────────────────────────────"
-        echo "  LIVE OUTPUT (Claude is working...)"
-        echo "  Press Ctrl+C to interrupt"
-        echo "───────────────────────────────────────────────────────"
-      fi
-
-      # Create a FIFO for controlled stdin delivery
-      # This allows us to send the prompt first, then /exit later
-      STDIN_FIFO=$(mktemp -u -t angainor-stdin.XXXXXX)
-      mkfifo "$STDIN_FIFO" || {
-        echo "  ✗ Failed to create FIFO, falling back to print mode"
-        LIVE_OUTPUT=false
-      }
-
-      if [ "$LIVE_OUTPUT" = true ]; then
-        # Clean up FIFO on exit (add to existing cleanup)
-        FIFO_TO_CLEANUP="$STDIN_FIFO"
-
-        # Run Claude interactively with script capturing output
-        # -q = quiet, -e = return exit code, -c = command
-        # Claude reads from FIFO, we control what goes in
-        if [ "$LIVE_OUTPUT_AUTO" = true ]; then
-          # Silent capture mode: use script for pseudo-TTY but don't show output
-          if [ -n "$TIMEOUT_CMD" ]; then
-            $TIMEOUT_CMD script -q -e -c "claude --dangerously-skip-permissions $CLAUDE_MCP_FLAGS < '$STDIN_FIFO'" "$STDOUT_FILE" > /dev/null 2> "$STDERR_FILE" &
-            CLAUDE_PID=$!
-          else
-            script -q -e -c "claude --dangerously-skip-permissions $CLAUDE_MCP_FLAGS < '$STDIN_FIFO'" "$STDOUT_FILE" > /dev/null 2> "$STDERR_FILE" &
-            CLAUDE_PID=$!
-          fi
-        else
-          # Interactive mode: show output on terminal while capturing
-          if [ -n "$TIMEOUT_CMD" ]; then
-            $TIMEOUT_CMD script -q -e -c "claude --dangerously-skip-permissions $CLAUDE_MCP_FLAGS < '$STDIN_FIFO'" "$STDOUT_FILE" 2> "$STDERR_FILE" &
-            CLAUDE_PID=$!
-          else
-            script -q -e -c "claude --dangerously-skip-permissions $CLAUDE_MCP_FLAGS < '$STDIN_FIFO'" "$STDOUT_FILE" 2> "$STDERR_FILE" &
-            CLAUDE_PID=$!
-          fi
-        fi
-
-        # Open FIFO for writing (keeps it open so Claude doesn't see EOF)
-        exec 7>"$STDIN_FIFO"
-
-        # Send the prompt
-        cat "$EFFECTIVE_PROMPT_FILE" >&7
-        log_verbose "Prompt sent to Claude via FIFO"
-
-        # Monitor output and wait for completion before sending /exit
-        # Completion indicators:
-        # 1. <iteration>COMPLETE</iteration> - normal iteration end
-        # 2. <objective>SUCCESS|IMPOSSIBLE|PLATEAU</objective> - terminal states
-        # 3. Output stable for COMPLETION_WAIT seconds after seeing actual response
-        COMPLETION_WAIT=15  # seconds of stable output before assuming done
-        MIN_OUTPUT_SIZE=5000  # minimum output size to consider "has response" (prompt echo is ~3-4KB)
-        POLL_INTERVAL=2
-        STABLE_COUNT=0
-        LAST_SIZE=0
-        HAS_RESPONSE=false
-        EXIT_SENT=false
-
-        log_verbose "Monitoring output for completion (min size: $MIN_OUTPUT_SIZE, stable wait: ${COMPLETION_WAIT}s)"
-
-        while kill -0 "$CLAUDE_PID" 2>/dev/null && [ "$EXIT_SENT" = false ]; do
-          sleep $POLL_INTERVAL
-
-          # Get current output size
-          if [ -f "$STDOUT_FILE" ]; then
-            CURRENT_SIZE=$(wc -c < "$STDOUT_FILE" 2>/dev/null | tr -d ' ' || echo "0")
-          else
-            CURRENT_SIZE=0
-          fi
-
-          # Check if we have meaningful output (beyond just the prompt echo)
-          if [ "$CURRENT_SIZE" -gt "$MIN_OUTPUT_SIZE" ]; then
-            HAS_RESPONSE=true
-          fi
-
-          # Check for explicit completion markers (only after minimum output)
-          if [ "$HAS_RESPONSE" = true ] && [ -f "$STDOUT_FILE" ]; then
-            if grep -qE "<iteration>COMPLETE</iteration>|<objective>(SUCCESS|IMPOSSIBLE|PLATEAU)</objective>" "$STDOUT_FILE" 2>/dev/null; then
-              log_verbose "Completion marker found in output, sending /exit"
-              echo '' >&7
-              echo '/exit' >&7
-              EXIT_SENT=true
-              break
-            fi
-          fi
-
-          # Check for stable output (no growth)
-          if [ "$CURRENT_SIZE" -eq "$LAST_SIZE" ]; then
-            STABLE_COUNT=$((STABLE_COUNT + POLL_INTERVAL))
-            if [ "$HAS_RESPONSE" = true ] && [ "$STABLE_COUNT" -ge "$COMPLETION_WAIT" ]; then
-              log_verbose "Output stable for ${STABLE_COUNT}s with response, sending /exit"
-              echo '' >&7
-              echo '/exit' >&7
-              EXIT_SENT=true
-              break
-            fi
-          else
-            # Output changed, reset stable counter
-            STABLE_COUNT=0
-            LAST_SIZE=$CURRENT_SIZE
-            log_verbose "Output growing: $CURRENT_SIZE bytes (has_response=$HAS_RESPONSE)"
-          fi
-        done
-
-        # Close FIFO writer (this also signals EOF to Claude if /exit wasn't sent)
-        exec 7>&-
-
-        # Clean up FIFO
-        rm -f "$STDIN_FIFO" 2>/dev/null || true
-        FIFO_TO_CLEANUP=""
-      fi
+    # Use stdbuf to disable output buffering if available (helps with capture issues)
+    UNBUF_CMD=""
+    if command -v stdbuf &> /dev/null; then
+      UNBUF_CMD="stdbuf -oL -eL"
+      log_verbose "Using stdbuf for unbuffered output"
     fi
 
-    # Fall through to print mode if live mode was disabled or FIFO failed
-    if [ "$LIVE_OUTPUT" != true ]; then
-      # Normal mode: capture to file only (no terminal output)
-      # Use stdbuf to disable output buffering if available (helps with capture issues)
-      UNBUF_CMD=""
-      if command -v stdbuf &> /dev/null; then
-        UNBUF_CMD="stdbuf -oL -eL"
-        log_verbose "Using stdbuf for unbuffered output"
-      fi
+    TAIL_PID=""
+    if [ "$LIVE_OUTPUT" = true ] && [ "$LIVE_OUTPUT_AUTO" != true ]; then
+      # Explicit live mode: show output on terminal while capturing
+      echo ""
+      echo "───────────────────────────────────────────────────────"
+      echo "  LIVE OUTPUT (Claude is working...)"
+      echo "  Press Ctrl+C to interrupt"
+      echo "───────────────────────────────────────────────────────"
 
+      # Start Claude in --print mode
       if [ -n "$TIMEOUT_CMD" ]; then
         if [ -n "$UNBUF_CMD" ]; then
-          $TIMEOUT_CMD $UNBUF_CMD claude --dangerously-skip-permissions --print --output-format text $CLAUDE_MCP_FLAGS < "$EFFECTIVE_PROMPT_FILE" > "$STDOUT_FILE" 2> "$STDERR_FILE" &
+          $TIMEOUT_CMD $UNBUF_CMD claude --dangerously-skip-permissions --print --no-session-persistence --output-format text $CLAUDE_CLI_FLAGS < "$EFFECTIVE_PROMPT_FILE" > "$STDOUT_FILE" 2> "$STDERR_FILE" &
         else
-          $TIMEOUT_CMD claude --dangerously-skip-permissions --print --output-format text $CLAUDE_MCP_FLAGS < "$EFFECTIVE_PROMPT_FILE" > "$STDOUT_FILE" 2> "$STDERR_FILE" &
+          $TIMEOUT_CMD claude --dangerously-skip-permissions --print --no-session-persistence --output-format text $CLAUDE_CLI_FLAGS < "$EFFECTIVE_PROMPT_FILE" > "$STDOUT_FILE" 2> "$STDERR_FILE" &
+        fi
+      else
+        if [ -n "$UNBUF_CMD" ]; then
+          $UNBUF_CMD claude --dangerously-skip-permissions --print --no-session-persistence --output-format text $CLAUDE_CLI_FLAGS < "$EFFECTIVE_PROMPT_FILE" > "$STDOUT_FILE" 2> "$STDERR_FILE" &
+        else
+          claude --dangerously-skip-permissions --print --no-session-persistence --output-format text $CLAUDE_CLI_FLAGS < "$EFFECTIVE_PROMPT_FILE" > "$STDOUT_FILE" 2> "$STDERR_FILE" &
+        fi
+      fi
+      CLAUDE_PID=$!
+
+      # Tail the output file for live display (background process)
+      touch "$STDOUT_FILE"
+      tail -f "$STDOUT_FILE" 2>/dev/null &
+      TAIL_PID=$!
+    else
+      # Normal/auto-live mode: capture to file only (no terminal output)
+      if [ -n "$TIMEOUT_CMD" ]; then
+        if [ -n "$UNBUF_CMD" ]; then
+          $TIMEOUT_CMD $UNBUF_CMD claude --dangerously-skip-permissions --print --no-session-persistence --output-format text $CLAUDE_CLI_FLAGS < "$EFFECTIVE_PROMPT_FILE" > "$STDOUT_FILE" 2> "$STDERR_FILE" &
+        else
+          $TIMEOUT_CMD claude --dangerously-skip-permissions --print --no-session-persistence --output-format text $CLAUDE_CLI_FLAGS < "$EFFECTIVE_PROMPT_FILE" > "$STDOUT_FILE" 2> "$STDERR_FILE" &
         fi
         CLAUDE_PID=$!
       else
         if [ -n "$UNBUF_CMD" ]; then
-          $UNBUF_CMD claude --dangerously-skip-permissions --print --output-format text $CLAUDE_MCP_FLAGS < "$EFFECTIVE_PROMPT_FILE" > "$STDOUT_FILE" 2> "$STDERR_FILE" &
+          $UNBUF_CMD claude --dangerously-skip-permissions --print --no-session-persistence --output-format text $CLAUDE_CLI_FLAGS < "$EFFECTIVE_PROMPT_FILE" > "$STDOUT_FILE" 2> "$STDERR_FILE" &
         else
-          claude --dangerously-skip-permissions --print --output-format text $CLAUDE_MCP_FLAGS < "$EFFECTIVE_PROMPT_FILE" > "$STDOUT_FILE" 2> "$STDERR_FILE" &
+          claude --dangerously-skip-permissions --print --no-session-persistence --output-format text $CLAUDE_CLI_FLAGS < "$EFFECTIVE_PROMPT_FILE" > "$STDOUT_FILE" 2> "$STDERR_FILE" &
         fi
         CLAUDE_PID=$!
       fi
     fi
 
     # Wait for Claude to complete (this allows interrupt signals to be caught)
-    # For live mode, use a polling loop with a grace period to handle hanging processes
+    # All modes now use --print, so simple wait is sufficient.
+    # The timeout ($TIMEOUT_CMD) handles runaway processes.
     log_verbose "Waiting for Claude process (PID: $CLAUDE_PID)"
+    wait "$CLAUDE_PID" 2>/dev/null || true
+    CLAUDE_EXIT_CODE=$?
 
-    if [ "$LIVE_OUTPUT" = true ]; then
-      # Polling wait with grace period for live mode
-      # The iteration timeout ($ITERATION_TIMEOUT) handles the main work period
-      # This grace period handles the case where Claude finished but script/pty hangs
-      GRACE_PERIOD=30  # seconds to wait after process appears done
-      POLL_INTERVAL=2
-      GRACE_START=""
-      LAST_SIZE=""
-      GRACE_LOGGED=false  # Only log grace period start once
-
-      while kill -0 "$CLAUDE_PID" 2>/dev/null; do
-        # Check if stdout file has been stable (no changes) for a while
-        if [ -f "$STDOUT_FILE" ]; then
-          CURRENT_SIZE=$(wc -c < "$STDOUT_FILE" 2>/dev/null | tr -d ' ' || echo "0")
-
-          if [ -n "$LAST_SIZE" ] && [ "$CURRENT_SIZE" = "$LAST_SIZE" ]; then
-            # Output hasn't changed
-            if [ -z "$GRACE_START" ]; then
-              GRACE_START=$(date +%s)
-              # Only log grace period start once to avoid spam
-              if [ "$GRACE_LOGGED" = false ]; then
-                log_verbose "Output stabilized, waiting up to ${GRACE_PERIOD}s before terminating hung process"
-                GRACE_LOGGED=true
-              fi
-            else
-              ELAPSED=$(($(date +%s) - GRACE_START))
-              if [ $ELAPSED -ge $GRACE_PERIOD ]; then
-                echo "  ⚠ Process appears hung (no output for ${GRACE_PERIOD}s), terminating..."
-                kill -TERM "$CLAUDE_PID" 2>/dev/null || true
-                sleep 2
-                kill -KILL "$CLAUDE_PID" 2>/dev/null || true
-                break
-              fi
-            fi
-          else
-            # Output changed, reset grace period (but don't reset GRACE_LOGGED)
-            GRACE_START=""
-            LAST_SIZE="$CURRENT_SIZE"
-          fi
-        fi
-        sleep $POLL_INTERVAL
-      done
-      wait "$CLAUDE_PID" 2>/dev/null || true
-      CLAUDE_EXIT_CODE=$?
-    else
-      # Normal mode: simple wait
-      wait "$CLAUDE_PID" 2>/dev/null || true
-      CLAUDE_EXIT_CODE=$?
+    # Kill tail process if running (live output display)
+    if [ -n "$TAIL_PID" ]; then
+      kill "$TAIL_PID" 2>/dev/null || true
+      wait "$TAIL_PID" 2>/dev/null || true
+      TAIL_PID=""
     fi
 
     log_verbose "Claude process completed with exit code: $CLAUDE_EXIT_CODE"
@@ -2171,35 +2061,9 @@ DYNAMIC_HEADER
     fi
 
     # Read captured output from files
-    if [ "$LIVE_OUTPUT" = true ]; then
-      # Strip terminal artifacts from script output (interactive mode includes lots of formatting)
-      # This includes:
-      # - ANSI CSI sequences: \x1b[...m (colors), \x1b[...H (cursor), etc.
-      # - ANSI OSC sequences: \x1b]...  (window titles, etc.)
-      # - Other escape sequences: \x1b(B, \x1b>, etc.
-      # - Control characters: backspace, carriage return, bells
-      # - Spinner artifacts that get overwritten
-      #
-      # IMPORTANT: Cursor movement codes carry semantic meaning in Claude's output:
-      # - Cursor-right (\x1b[1C, \x1b[2C) = SPACE between words
-      # - Cursor-down (\x1b[1B, \x1b[2B) = NEWLINE
-      # We must convert these to the appropriate characters, not just delete them.
-      # Example: "I'll\x1b[1Cstart\x1b[1Bnext" should become "I'll start\nnext"
-      OUTPUT=$(cat "$STDOUT_FILE" 2>/dev/null | \
-        sed 's/\x1b\[[0-9]*C/ /g' | \
-        sed 's/\x1b\[[0-9]*B/\n/g' | \
-        sed 's/\x1b\[[0-9;]*[a-zA-DFGHJKSTfm]//g' | \
-        sed 's/\x1b\][^\x07]*\x07//g' | \
-        sed 's/\x1b[()][AB012]//g' | \
-        sed 's/\x1b[>=]//g' | \
-        tr -d '\r\x07\x08' | \
-        sed 's/.*\r//g' | \
-        sed 's/[●✓✗✶✻✽✢·⎿▌▐▛▜▝▘❯]//g' | \
-        tr -s ' ' | \
-        sed '/^[[:space:]]*$/d' || echo "")
-    else
-      OUTPUT=$(cat "$STDOUT_FILE" 2>/dev/null || echo "")
-    fi
+    # All modes now use --print --output-format text, so output is clean text
+    # (no ANSI stripping needed — that was only required for the old script/TTY mode)
+    OUTPUT=$(cat "$STDOUT_FILE" 2>/dev/null || echo "")
     STDERR_CONTENT=$(cat "$STDERR_FILE" 2>/dev/null || echo "")
     log_verbose "Output captured: ${#OUTPUT} chars, stderr: ${#STDERR_CONTENT} chars"
 
@@ -2268,10 +2132,12 @@ DYNAMIC_HEADER
       fi
     fi
 
-    # Check for transient API errors
-    # Note: "No messages returned" is handled separately above (long session bug)
-    if echo "$OUTPUT" | grep -qE "ECONNRESET|ETIMEDOUT|rate limit|503|502|504"; then
-      MATCHED_ERROR=$(echo "$OUTPUT" | grep -oE "ECONNRESET|ETIMEDOUT|rate limit|503|502|504" | head -1)
+    # Check for transient API errors and known CLI bugs
+    # Check both stdout and stderr since some errors (e.g. "No messages returned",
+    # "unhandled promise rejection") appear on stderr rather than stdout
+    COMBINED_CHECK="$OUTPUT $STDERR_CONTENT"
+    if echo "$COMBINED_CHECK" | grep -qiE "ECONNRESET|ETIMEDOUT|rate limit|503|502|504|No messages returned|unhandled promise rejection|EPIPE"; then
+      MATCHED_ERROR=$(echo "$COMBINED_CHECK" | grep -oiE "ECONNRESET|ETIMEDOUT|rate limit|503|502|504|No messages returned|unhandled promise rejection|EPIPE" | head -1)
       echo ""
       echo "  ⚠ Transient API error detected (attempt $retry/$MAX_RETRIES)"
       log_verbose "API ERROR: Matched pattern '$MATCHED_ERROR'"
@@ -2464,7 +2330,7 @@ $EXTRACTED_METRICS
           echo "    - Prompt file exists: $([ -f "$EFFECTIVE_PROMPT_FILE" ] && echo "yes" || echo "NO")"
           echo "    - Prompt file size: $(wc -c < "$EFFECTIVE_PROMPT_FILE" 2>/dev/null | tr -d ' ' || echo "N/A") bytes"
           echo "    - Config file exists: $([ -f "$CONFIG_FILE" ] && echo "yes" || echo "NO")"
-          echo "    - Claude command: claude --dangerously-skip-permissions --print"
+          echo "    - Claude command: claude --dangerously-skip-permissions --print $CLAUDE_CLI_FLAGS"
           echo "    - Check if Claude CLI is authenticated: run 'claude doctor'"
         fi
         record_metrics "failed" "EMPTY_RESPONSE" "Empty response after $MAX_RETRIES retries"

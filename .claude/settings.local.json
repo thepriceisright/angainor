@@ -139,7 +139,15 @@
       "Bash(# Check what''s in .env \\(just the key names, not values\\) cat /workspace/repos/claude-and-ralph/.env)",
       "Bash(then)",
       "Bash(else)",
-      "Bash(fi)"
+      "Bash(fi)",
+      "Bash(claude:*)",
+      "WebFetch(domain:releasebot.io)",
+      "Bash(gh api:*)",
+      "WebFetch(domain:news.ycombinator.com)",
+      "Bash(gh issue list:*)",
+      "Bash(gh issue view:*)",
+      "Bash(__NEW_LINE_77fa6d7cd8b11659__ rm -f \"$EMPTY_MCP_CONFIG\")",
+      "Bash(__NEW_LINE_f33ff5c0959a4427__ rm -f \"$EMPTY_MCP_CONFIG\")"
     ]
   }
 }
