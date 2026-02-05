@@ -48,11 +48,6 @@ check_dependencies() {
         missing+=("git")
     fi
 
-    if ! command -v claude &> /dev/null; then
-        log_warn "Claude Code CLI not found. You'll need to install it before running Angainor."
-        log_warn "  Install: npm install -g @anthropic-ai/claude-code"
-    fi
-
     if [ ${#missing[@]} -gt 0 ]; then
         log_error "Missing required dependencies: ${missing[*]}"
         log_error "Please install them and try again."
@@ -60,6 +55,95 @@ check_dependencies() {
     fi
 
     log_success "Dependencies OK"
+}
+
+# Validate Claude Code CLI installation
+# Returns 0 even on failure (installation continues with warnings)
+validate_claude_cli() {
+    log_info "Checking Claude Code CLI..."
+
+    # Check if CLI exists
+    if ! command -v claude &> /dev/null; then
+        log_warn "Claude Code CLI not found."
+        log_warn "  Install: npm install -g @anthropic-ai/claude-code"
+        log_warn "  Angainor files will be installed, but you'll need Claude CLI to run it."
+        return 0
+    fi
+
+    # Check version
+    local version
+    version=$(claude --version 2>/dev/null | head -1 || echo "unknown")
+    local ver_num
+    ver_num=$(echo "$version" | grep -oE '^[0-9]+\.[0-9]+\.[0-9]+' || echo "")
+
+    if [ -z "$ver_num" ]; then
+        log_warn "Could not parse Claude CLI version from: $version"
+        log_warn "  Angainor requires version 2.1.20 or later."
+        return 0
+    fi
+
+    log_success "Claude CLI version: $ver_num"
+
+    local major minor patch
+    major=$(echo "$ver_num" | cut -d. -f1)
+    minor=$(echo "$ver_num" | cut -d. -f2)
+    patch=$(echo "$ver_num" | cut -d. -f3)
+
+    local min_version="2.1.20"
+    if [ "$major" -lt 2 ] 2>/dev/null || \
+       { [ "$major" -eq 2 ] && [ "$minor" -lt 1 ]; } 2>/dev/null || \
+       { [ "$major" -eq 2 ] && [ "$minor" -eq 1 ] && [ "$patch" -lt 20 ]; } 2>/dev/null; then
+        log_error "Claude CLI $ver_num is older than required minimum ($min_version)"
+        log_error "  Run 'claude update' to update."
+        log_error "  Angainor may not work correctly with this version."
+        return 0
+    fi
+
+    # Smoke test: verify our exact flag combination works with a trivial prompt
+    log_info "Running smoke test (this makes a small API call)..."
+
+    local tmp_mcp
+    tmp_mcp=$(mktemp -t angainor-install-mcp.XXXXXX)
+    echo '{"mcpServers":{}}' > "$tmp_mcp"
+
+    local smoke_output=""
+    local smoke_exit=0
+
+    if command -v timeout &> /dev/null; then
+        smoke_output=$(echo "Reply with only the word OK" | timeout 30 claude \
+            --dangerously-skip-permissions --print --no-session-persistence \
+            --output-format text --strict-mcp-config --mcp-config "$tmp_mcp" \
+            --disable-slash-commands 2>&1) || smoke_exit=$?
+    else
+        smoke_output=$(echo "Reply with only the word OK" | claude \
+            --dangerously-skip-permissions --print --no-session-persistence \
+            --output-format text --strict-mcp-config --mcp-config "$tmp_mcp" \
+            --disable-slash-commands 2>&1) || smoke_exit=$?
+    fi
+
+    rm -f "$tmp_mcp"
+
+    if [ $smoke_exit -eq 124 ]; then
+        log_warn "Smoke test timed out after 30s. The CLI may be slow to start."
+        log_warn "  Angainor should still work, but first iterations may be slow."
+    elif [ $smoke_exit -ne 0 ]; then
+        log_error "Smoke test failed (exit code: $smoke_exit)"
+        # Show first 3 lines of output for debugging
+        log_error "  Output: $(echo "$smoke_output" | head -3)"
+        if echo "$smoke_output" | grep -qi "auth\|login\|api.key\|unauthorized\|forbidden"; then
+            log_error "  This looks like an authentication issue."
+            log_error "  Run 'claude' interactively first to complete login."
+        elif echo "$smoke_output" | grep -qi "unknown option\|unrecognized"; then
+            log_error "  Some CLI flags are not supported by this version."
+            log_error "  Run 'claude update' to get the latest version."
+        fi
+    elif echo "$smoke_output" | grep -qi "ok"; then
+        log_success "Smoke test passed — Claude CLI is ready for Angainor"
+    else
+        log_warn "Smoke test returned unexpected output: $(echo "$smoke_output" | head -1)"
+        log_warn "  This may indicate authentication or API issues."
+        log_warn "  Run 'claude' interactively to verify your setup."
+    fi
 }
 
 # Download a file from the repo
@@ -153,6 +237,7 @@ install_angainor() {
     log_info "Installing Angainor to: $TARGET_DIR"
 
     check_dependencies
+    validate_claude_cli
 
     # Create directory structure
     log_info "Creating directory structure..."
