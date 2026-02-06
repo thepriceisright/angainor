@@ -251,21 +251,20 @@ configure_angainor_profile() {
     fi
   done
 
-  # Back up and clear auto-memory (CLI 2.1.32+ auto-records/recalls memories)
+  # Back up and clear auto-memory directory (CLI 2.1.32+ auto-records/recalls memories)
   # Angainor manages its own cross-iteration memory via progress.txt.
   # Auto-memories from prior interactive sessions could inject stale context.
+  # Move the entire directory aside (not just *.md) to handle any file types or subdirs.
   if [ -d "$AUTO_MEMORY_DIR" ] && [ "$(ls -A "$AUTO_MEMORY_DIR" 2>/dev/null)" ]; then
     AUTO_MEMORY_BACKUP=$(mktemp -d -t angainor-memory.XXXXXX)
     cp -a "$AUTO_MEMORY_DIR/." "$AUTO_MEMORY_BACKUP/"
-    rm -f "$AUTO_MEMORY_DIR"/*.md 2>/dev/null || true
-    local file_count
-    file_count=$(ls -1 "$AUTO_MEMORY_BACKUP" 2>/dev/null | wc -l)
-    echo "  Backed up auto-memory ($file_count files) → will restore on exit"
+    rm -rf "$AUTO_MEMORY_DIR"
+    echo "  Backed up auto-memory → will restore on exit"
   fi
 }
 
 # Restore plugins and auto-memory to their original state
-restore_plugins() {
+restore_angainor_profile() {
   echo "Restoring Angainor profile..."
   for plugin in "${ANGAINOR_DISABLE_PLUGINS[@]}"; do
     if claude plugin enable "$plugin" 2>/dev/null; then
@@ -276,8 +275,9 @@ restore_plugins() {
     fi
   done
 
-  # Restore auto-memory from backup
+  # Restore auto-memory from backup (full state reset — remove any files written during run)
   if [ -n "$AUTO_MEMORY_BACKUP" ] && [ -d "$AUTO_MEMORY_BACKUP" ]; then
+    rm -rf "$AUTO_MEMORY_DIR" 2>/dev/null || true
     mkdir -p "$AUTO_MEMORY_DIR"
     cp -a "$AUTO_MEMORY_BACKUP/." "$AUTO_MEMORY_DIR/"
     rm -rf "$AUTO_MEMORY_BACKUP" 2>/dev/null || true
@@ -320,7 +320,7 @@ cleanup_on_exit() {
     echo "───────────────────────────────────────────────────────"
   fi
 
-  restore_plugins
+  restore_angainor_profile
   exit $exit_code
 }
 
@@ -352,7 +352,7 @@ interrupt_handler() {
   # Also kill any orphaned claude processes from this script
   pkill -P $$ 2>/dev/null || true
 
-  restore_plugins
+  restore_angainor_profile
   echo "  Angainor terminated."
   exit 130  # Standard exit code for Ctrl+C
 }

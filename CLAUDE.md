@@ -253,15 +253,15 @@ angainor.sh configures a minimal environment for autonomous runs using three mec
 - `explanatory-output-style@claude-plugins-official` - Adds unnecessary verbosity
 
 **Auto-memory isolation** (CLI 2.1.32+ — backed up and cleared during runs):
-- Claude Code 2.1.32+ automatically records and recalls memories via `~/.claude/projects/<path>/memory/MEMORY.md`
+- Claude Code 2.1.32+ automatically records and recalls memories via files in `~/.claude/projects/<path>/memory/`
 - Angainor manages its own cross-iteration memory via `progress.txt`, so auto-memory is redundant and could inject stale context from prior interactive sessions
-- `configure_angainor_profile()` backs up the memory directory and clears it
-- `restore_plugins()` restores the original memory files on exit
+- `configure_angainor_profile()` backs up the entire memory directory and removes it
+- `restore_angainor_profile()` removes any files written during the run, then restores the original directory from backup
 - No CLI flag exists to disable auto-memory; file-level isolation is required
 
 **Profile lifecycle:**
 - `configure_angainor_profile()` disables plugins and isolates auto-memory at startup
-- `restore_plugins()` re-enables plugins and restores auto-memory on exit (normal, Ctrl+C, or error)
+- `restore_angainor_profile()` re-enables plugins and restores auto-memory on exit (normal, Ctrl+C, or error)
 - Missing plugins are handled gracefully (no errors)
 
 **Minimum CLI version:** 2.1.20+ (earlier versions may lack required flags)
