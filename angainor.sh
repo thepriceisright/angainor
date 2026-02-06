@@ -254,12 +254,15 @@ configure_angainor_profile() {
   # Back up and clear auto-memory directory (CLI 2.1.32+ auto-records/recalls memories)
   # Angainor manages its own cross-iteration memory via progress.txt.
   # Auto-memories from prior interactive sessions could inject stale context.
-  # Move the entire directory aside (not just *.md) to handle any file types or subdirs.
+  # Always create backup marker so restore_angainor_profile() can clean up files
+  # that Claude may write during the run, even if the directory was initially empty.
+  AUTO_MEMORY_BACKUP=$(mktemp -d -t angainor-memory.XXXXXX)
   if [ -d "$AUTO_MEMORY_DIR" ] && [ "$(ls -A "$AUTO_MEMORY_DIR" 2>/dev/null)" ]; then
-    AUTO_MEMORY_BACKUP=$(mktemp -d -t angainor-memory.XXXXXX)
     cp -a "$AUTO_MEMORY_DIR/." "$AUTO_MEMORY_BACKUP/"
     rm -rf "$AUTO_MEMORY_DIR"
     echo "  Backed up auto-memory → will restore on exit"
+  else
+    echo "  Auto-memory isolated (clean start) → will clean up on exit"
   fi
 }
 
