@@ -241,7 +241,7 @@ When the agent doesn't output proper XML tags, angainor.sh uses an LLM (via Open
 - `--no-llm-extraction`: Disable LLM extraction (not recommended)
 
 ### Angainor Profile
-angainor.sh configures a minimal environment for autonomous runs using two mechanisms:
+angainor.sh configures a minimal environment for autonomous runs using three mechanisms:
 
 **Per-session CLI flags** (primary — no global state changes):
 - `--strict-mcp-config --mcp-config <empty>` - Disables all MCP servers
@@ -252,9 +252,16 @@ angainor.sh configures a minimal environment for autonomous runs using two mecha
 - `automatic-code-review@claude-skillz` - Interferes with autonomous iteration flow
 - `explanatory-output-style@claude-plugins-official` - Adds unnecessary verbosity
 
-**Plugin lifecycle:**
-- `configure_angainor_profile()` disables plugins at startup
-- `restore_plugins()` re-enables on exit (normal, Ctrl+C, or error)
+**Auto-memory isolation** (CLI 2.1.32+ — backed up and cleared during runs):
+- Claude Code 2.1.32+ automatically records and recalls memories via `~/.claude/projects/<path>/memory/MEMORY.md`
+- Angainor manages its own cross-iteration memory via `progress.txt`, so auto-memory is redundant and could inject stale context from prior interactive sessions
+- `configure_angainor_profile()` backs up the memory directory and clears it
+- `restore_plugins()` restores the original memory files on exit
+- No CLI flag exists to disable auto-memory; file-level isolation is required
+
+**Profile lifecycle:**
+- `configure_angainor_profile()` disables plugins and isolates auto-memory at startup
+- `restore_plugins()` re-enables plugins and restores auto-memory on exit (normal, Ctrl+C, or error)
 - Missing plugins are handled gracefully (no errors)
 
 **Minimum CLI version:** 2.1.20+ (earlier versions may lack required flags)
