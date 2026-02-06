@@ -327,6 +327,7 @@ Skills are automatically available to future Claude Code sessions across all pro
 {
   "project": "ProjectName",
   "branchName": "angainor/feature-name-kebab-case",
+  "baseBranch": "main",
   "description": "Feature description",
   "userStories": [
     {
@@ -343,6 +344,9 @@ Skills are automatically available to future Claude Code sessions across all pro
   ]
 }
 ```
+
+**Project fields:**
+- `baseBranch`: string (optional) - branch to create `branchName` from (defaults to the repo's default branch if omitted)
 
 **Story status fields:**
 - `status`: `"pending"` | `"blocked"` | `"passed"` - richer state than boolean `passes`
