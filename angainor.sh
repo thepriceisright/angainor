@@ -225,36 +225,74 @@ METRICS_FILE="$SCRIPT_DIR/metrics.json"
 SCREENSHOT_DIR="$SCRIPT_DIR/screenshots"
 SKILL_DIR="$HOME/.claude/skills/angainor-learnings"
 
+# Auto-memory directory for the current project (Claude Code 2.1.32+)
+# Claude CLI now automatically reads MEMORY.md into system context and may write
+# memories during execution. Angainor uses its own memory model (progress.txt) and
+# needs clean context per iteration, so we back up and clear auto-memory during runs.
+# Format: ~/.claude/projects/<pwd-with-slashes-as-dashes>/memory/
+AUTO_MEMORY_DIR="$HOME/.claude/projects/$(echo "$PWD" | tr '/' '-')/memory"
+AUTO_MEMORY_BACKUP=""
+
 # Plugins to disable during Angainor runs (interfering with autonomous execution)
 ANGAINOR_DISABLE_PLUGINS=(
   "automatic-code-review@claude-skillz"
   "explanatory-output-style@claude-plugins-official"
 )
 
-# Configure Angainor profile by disabling interfering plugins
+# Configure Angainor profile by disabling interfering plugins and isolating auto-memory
 configure_angainor_profile() {
-  echo "Configuring Angainor profile (disabling interfering plugins)..."
+  echo "Configuring Angainor profile..."
   for plugin in "${ANGAINOR_DISABLE_PLUGINS[@]}"; do
     if claude plugin disable "$plugin" 2>/dev/null; then
-      echo "  Disabled: $plugin"
+      echo "  Disabled plugin: $plugin"
     else
       # Plugin might not be installed - that's fine
       echo "  Skipped (not installed): $plugin"
     fi
   done
+
+  # Back up and clear auto-memory directory (CLI 2.1.32+ auto-records/recalls memories)
+  # Angainor manages its own cross-iteration memory via progress.txt.
+  # Auto-memories from prior interactive sessions could inject stale context.
+  # Always create backup marker so restore_angainor_profile() can clean up files
+  # that Claude may write during the run, even if the directory was initially empty.
+  # Non-fatal: if mktemp fails (full disk, permissions), skip memory isolation
+  # rather than aborting the entire run.
+  if AUTO_MEMORY_BACKUP=$(mktemp -d -t angainor-memory.XXXXXX 2>/dev/null); then
+    if [ -d "$AUTO_MEMORY_DIR" ] && [ "$(ls -A "$AUTO_MEMORY_DIR" 2>/dev/null)" ]; then
+      cp -a "$AUTO_MEMORY_DIR/." "$AUTO_MEMORY_BACKUP/"
+      rm -rf "$AUTO_MEMORY_DIR"
+      echo "  Backed up auto-memory → will restore on exit"
+    else
+      echo "  Auto-memory isolated (clean start) → will clean up on exit"
+    fi
+  else
+    AUTO_MEMORY_BACKUP=""
+    echo "  ⚠ Could not create temp dir for auto-memory backup; skipping isolation"
+  fi
 }
 
-# Restore plugins to their original state
-restore_plugins() {
-  echo "Restoring plugins..."
+# Restore plugins and auto-memory to their original state
+restore_angainor_profile() {
+  echo "Restoring Angainor profile..."
   for plugin in "${ANGAINOR_DISABLE_PLUGINS[@]}"; do
     if claude plugin enable "$plugin" 2>/dev/null; then
-      echo "  Enabled: $plugin"
+      echo "  Enabled plugin: $plugin"
     else
       # Plugin might not be installed - that's fine
       echo "  Skipped (not installed): $plugin"
     fi
   done
+
+  # Restore auto-memory from backup (full state reset — remove any files written during run)
+  if [ -n "$AUTO_MEMORY_BACKUP" ] && [ -d "$AUTO_MEMORY_BACKUP" ]; then
+    rm -rf "$AUTO_MEMORY_DIR" 2>/dev/null || true
+    mkdir -p "$AUTO_MEMORY_DIR"
+    cp -a "$AUTO_MEMORY_BACKUP/." "$AUTO_MEMORY_DIR/"
+    rm -rf "$AUTO_MEMORY_BACKUP" 2>/dev/null || true
+    AUTO_MEMORY_BACKUP=""
+    echo "  Restored auto-memory"
+  fi
 }
 
 # Track last response for error reporting
@@ -291,7 +329,7 @@ cleanup_on_exit() {
     echo "───────────────────────────────────────────────────────"
   fi
 
-  restore_plugins
+  restore_angainor_profile
   exit $exit_code
 }
 
@@ -323,7 +361,7 @@ interrupt_handler() {
   # Also kill any orphaned claude processes from this script
   pkill -P $$ 2>/dev/null || true
 
-  restore_plugins
+  restore_angainor_profile
   echo "  Angainor terminated."
   exit 130  # Standard exit code for Ctrl+C
 }
@@ -1966,6 +2004,10 @@ DYNAMIC_HEADER
     #
     # NOTE: --strict-mcp-config alone no longer disables MCP in CLI v2.1.31+
     # Must pair with --mcp-config pointing to an empty config file.
+    #
+    # AUTO-MEMORY (CLI 2.1.32+): Claude now auto-records/recalls memories. We isolate
+    # this in configure_angainor_profile() by backing up and clearing the memory dir.
+    # No CLI flag exists to disable auto-memory; file-level isolation is required.
     CLAUDE_CLI_FLAGS="--strict-mcp-config --mcp-config $EMPTY_MCP_CONFIG --disable-slash-commands"
 
     # All modes now use --print for reliability. The old live mode used 'script' to
