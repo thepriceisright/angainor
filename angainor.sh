@@ -256,13 +256,19 @@ configure_angainor_profile() {
   # Auto-memories from prior interactive sessions could inject stale context.
   # Always create backup marker so restore_angainor_profile() can clean up files
   # that Claude may write during the run, even if the directory was initially empty.
-  AUTO_MEMORY_BACKUP=$(mktemp -d -t angainor-memory.XXXXXX)
-  if [ -d "$AUTO_MEMORY_DIR" ] && [ "$(ls -A "$AUTO_MEMORY_DIR" 2>/dev/null)" ]; then
-    cp -a "$AUTO_MEMORY_DIR/." "$AUTO_MEMORY_BACKUP/"
-    rm -rf "$AUTO_MEMORY_DIR"
-    echo "  Backed up auto-memory → will restore on exit"
+  # Non-fatal: if mktemp fails (full disk, permissions), skip memory isolation
+  # rather than aborting the entire run.
+  if AUTO_MEMORY_BACKUP=$(mktemp -d -t angainor-memory.XXXXXX 2>/dev/null); then
+    if [ -d "$AUTO_MEMORY_DIR" ] && [ "$(ls -A "$AUTO_MEMORY_DIR" 2>/dev/null)" ]; then
+      cp -a "$AUTO_MEMORY_DIR/." "$AUTO_MEMORY_BACKUP/"
+      rm -rf "$AUTO_MEMORY_DIR"
+      echo "  Backed up auto-memory → will restore on exit"
+    else
+      echo "  Auto-memory isolated (clean start) → will clean up on exit"
+    fi
   else
-    echo "  Auto-memory isolated (clean start) → will clean up on exit"
+    AUTO_MEMORY_BACKUP=""
+    echo "  ⚠ Could not create temp dir for auto-memory backup; skipping isolation"
   fi
 }
 
