@@ -21,6 +21,7 @@ Take a PRD (markdown file or text) and convert it to `prd.json` in the **project
 {
   "project": "[Project Name]",
   "branchName": "angainor/[feature-name-kebab-case]",
+  "baseBranch": "[branch to create from — ask user if unclear, defaults to repo default branch]",
   "description": "[Feature description from PRD title/intro]",
   "userStories": [
     {
@@ -122,7 +123,8 @@ Frontend stories are NOT complete until visually verified. Angainor will use the
 3. **Priority**: Based on dependency order, then document order
 4. **All stories**: `passes: false` and empty `notes`
 5. **branchName**: Derive from feature name, kebab-case, prefixed with `angainor/`
-6. **Always add**: "Typecheck passes" to every story's acceptance criteria
+6. **baseBranch**: Ask the user which branch to base from if unclear; omit to use the repo's default branch
+7. **Always add**: "Typecheck passes" to every story's acceptance criteria
 
 ---
 
@@ -165,6 +167,7 @@ Add ability to mark tasks with different statuses.
 {
   "project": "TaskApp",
   "branchName": "angainor/task-status",
+  "baseBranch": "main",
   "description": "Task Status Feature - Track task progress with status indicators",
   "userStories": [
     {

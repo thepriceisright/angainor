@@ -183,6 +183,7 @@ Defines the project and user stories for PRD mode.
 {
   "project": "MyApp",
   "branchName": "angainor/task-priority",
+  "baseBranch": "main",
   "description": "Task Priority System - Add priority levels to tasks",
   "userStories": [
     {
@@ -202,6 +203,9 @@ Defines the project and user stories for PRD mode.
   ]
 }
 ```
+
+**Project Fields:**
+- `baseBranch`: string (optional) - branch to create `branchName` from (defaults to the repo's default branch if omitted)
 
 **Story Status Fields:**
 - `passes`: boolean - whether the story is complete
