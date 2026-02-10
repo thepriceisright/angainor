@@ -1775,6 +1775,17 @@ if [ "$VERBOSE" = true ]; then
     log_error "Claude CLI not found"
   fi
 
+  # Check jq (required for JSON processing and stream-json output extraction)
+  if command -v jq &> /dev/null; then
+    JQ_VERSION=$(jq --version 2>/dev/null || echo "unknown")
+    echo "  ✓ jq found: $JQ_VERSION"
+  else
+    echo "  ✗ jq not found - required for JSON processing and output extraction"
+    echo "    Install with: apt install jq (Debian/Ubuntu), brew install jq (macOS), or yum install jq (RHEL)"
+    log_error "jq not found in PATH"
+    exit 1
+  fi
+
   # Check config file
   if [ -f "$CONFIG_FILE" ]; then
     CONFIG_SIZE=$(wc -c < "$CONFIG_FILE" | tr -d ' ')
@@ -1947,7 +1958,7 @@ DYNAMIC_HEADER
     if [ "$MODE" = "objective" ]; then
       ITERATION_TIMEOUT=3600  # 60 minutes for objective mode (ML benchmarks often take 30-60 min)
     else
-      ITERATION_TIMEOUT=600   # 10 minutes for PRD mode
+      ITERATION_TIMEOUT=1800  # 30 minutes for PRD mode
     fi
   elif [ "$CLAUDE_TIMEOUT" = "0" ]; then
     ITERATION_TIMEOUT=0  # No timeout
@@ -1977,9 +1988,9 @@ DYNAMIC_HEADER
     if [ "$ITERATION_TIMEOUT" = "0" ]; then
       TIMEOUT_CMD=""  # No timeout requested
     elif command -v gtimeout &> /dev/null; then
-      TIMEOUT_CMD="gtimeout --signal=KILL $ITERATION_TIMEOUT"
+      TIMEOUT_CMD="gtimeout --signal=TERM --kill-after=15 $ITERATION_TIMEOUT"
     elif command -v timeout &> /dev/null; then
-      TIMEOUT_CMD="timeout --signal=KILL $ITERATION_TIMEOUT"
+      TIMEOUT_CMD="timeout --signal=TERM --kill-after=15 $ITERATION_TIMEOUT"
     else
       TIMEOUT_CMD=""  # No timeout available, run without
     fi
@@ -2036,37 +2047,37 @@ DYNAMIC_HEADER
       # Start Claude in --print mode
       if [ -n "$TIMEOUT_CMD" ]; then
         if [ -n "$UNBUF_CMD" ]; then
-          $TIMEOUT_CMD $UNBUF_CMD claude --dangerously-skip-permissions --print --no-session-persistence --output-format text $CLAUDE_CLI_FLAGS < "$EFFECTIVE_PROMPT_FILE" > "$STDOUT_FILE" 2> "$STDERR_FILE" &
+          $TIMEOUT_CMD $UNBUF_CMD claude --dangerously-skip-permissions --print --no-session-persistence --output-format stream-json --verbose $CLAUDE_CLI_FLAGS < "$EFFECTIVE_PROMPT_FILE" > "$STDOUT_FILE" 2> "$STDERR_FILE" &
         else
-          $TIMEOUT_CMD claude --dangerously-skip-permissions --print --no-session-persistence --output-format text $CLAUDE_CLI_FLAGS < "$EFFECTIVE_PROMPT_FILE" > "$STDOUT_FILE" 2> "$STDERR_FILE" &
+          $TIMEOUT_CMD claude --dangerously-skip-permissions --print --no-session-persistence --output-format stream-json --verbose $CLAUDE_CLI_FLAGS < "$EFFECTIVE_PROMPT_FILE" > "$STDOUT_FILE" 2> "$STDERR_FILE" &
         fi
       else
         if [ -n "$UNBUF_CMD" ]; then
-          $UNBUF_CMD claude --dangerously-skip-permissions --print --no-session-persistence --output-format text $CLAUDE_CLI_FLAGS < "$EFFECTIVE_PROMPT_FILE" > "$STDOUT_FILE" 2> "$STDERR_FILE" &
+          $UNBUF_CMD claude --dangerously-skip-permissions --print --no-session-persistence --output-format stream-json --verbose $CLAUDE_CLI_FLAGS < "$EFFECTIVE_PROMPT_FILE" > "$STDOUT_FILE" 2> "$STDERR_FILE" &
         else
-          claude --dangerously-skip-permissions --print --no-session-persistence --output-format text $CLAUDE_CLI_FLAGS < "$EFFECTIVE_PROMPT_FILE" > "$STDOUT_FILE" 2> "$STDERR_FILE" &
+          claude --dangerously-skip-permissions --print --no-session-persistence --output-format stream-json --verbose $CLAUDE_CLI_FLAGS < "$EFFECTIVE_PROMPT_FILE" > "$STDOUT_FILE" 2> "$STDERR_FILE" &
         fi
       fi
       CLAUDE_PID=$!
 
       # Tail the output file for live display (background process)
       touch "$STDOUT_FILE"
-      tail -f "$STDOUT_FILE" 2>/dev/null &
+      tail -f "$STDOUT_FILE" 2>/dev/null | jq -r --unbuffered 'select(.type == "assistant") | .message.content[]? | select(.type == "text") | .text // empty' 2>/dev/null &
       TAIL_PID=$!
     else
       # Normal/auto-live mode: capture to file only (no terminal output)
       if [ -n "$TIMEOUT_CMD" ]; then
         if [ -n "$UNBUF_CMD" ]; then
-          $TIMEOUT_CMD $UNBUF_CMD claude --dangerously-skip-permissions --print --no-session-persistence --output-format text $CLAUDE_CLI_FLAGS < "$EFFECTIVE_PROMPT_FILE" > "$STDOUT_FILE" 2> "$STDERR_FILE" &
+          $TIMEOUT_CMD $UNBUF_CMD claude --dangerously-skip-permissions --print --no-session-persistence --output-format stream-json --verbose $CLAUDE_CLI_FLAGS < "$EFFECTIVE_PROMPT_FILE" > "$STDOUT_FILE" 2> "$STDERR_FILE" &
         else
-          $TIMEOUT_CMD claude --dangerously-skip-permissions --print --no-session-persistence --output-format text $CLAUDE_CLI_FLAGS < "$EFFECTIVE_PROMPT_FILE" > "$STDOUT_FILE" 2> "$STDERR_FILE" &
+          $TIMEOUT_CMD claude --dangerously-skip-permissions --print --no-session-persistence --output-format stream-json --verbose $CLAUDE_CLI_FLAGS < "$EFFECTIVE_PROMPT_FILE" > "$STDOUT_FILE" 2> "$STDERR_FILE" &
         fi
         CLAUDE_PID=$!
       else
         if [ -n "$UNBUF_CMD" ]; then
-          $UNBUF_CMD claude --dangerously-skip-permissions --print --no-session-persistence --output-format text $CLAUDE_CLI_FLAGS < "$EFFECTIVE_PROMPT_FILE" > "$STDOUT_FILE" 2> "$STDERR_FILE" &
+          $UNBUF_CMD claude --dangerously-skip-permissions --print --no-session-persistence --output-format stream-json --verbose $CLAUDE_CLI_FLAGS < "$EFFECTIVE_PROMPT_FILE" > "$STDOUT_FILE" 2> "$STDERR_FILE" &
         else
-          claude --dangerously-skip-permissions --print --no-session-persistence --output-format text $CLAUDE_CLI_FLAGS < "$EFFECTIVE_PROMPT_FILE" > "$STDOUT_FILE" 2> "$STDERR_FILE" &
+          claude --dangerously-skip-permissions --print --no-session-persistence --output-format stream-json --verbose $CLAUDE_CLI_FLAGS < "$EFFECTIVE_PROMPT_FILE" > "$STDOUT_FILE" 2> "$STDERR_FILE" &
         fi
         CLAUDE_PID=$!
       fi
@@ -2076,8 +2087,8 @@ DYNAMIC_HEADER
     # All modes now use --print, so simple wait is sufficient.
     # The timeout ($TIMEOUT_CMD) handles runaway processes.
     log_verbose "Waiting for Claude process (PID: $CLAUDE_PID)"
-    wait "$CLAUDE_PID" 2>/dev/null || true
-    CLAUDE_EXIT_CODE=$?
+    CLAUDE_EXIT_CODE=0
+    wait "$CLAUDE_PID" 2>/dev/null || CLAUDE_EXIT_CODE=$?
 
     # Kill tail process if running (live output display)
     if [ -n "$TAIL_PID" ]; then
@@ -2103,9 +2114,11 @@ DYNAMIC_HEADER
     fi
 
     # Read captured output from files
-    # All modes now use --print --output-format text, so output is clean text
-    # (no ANSI stripping needed — that was only required for the old script/TTY mode)
-    OUTPUT=$(cat "$STDOUT_FILE" 2>/dev/null || echo "")
+    # All modes use --print --output-format stream-json --verbose, so output is JSONL.
+    # Extract assistant text blocks from the JSONL stream using jq.
+    # This survives process termination (stream-json writes events incrementally,
+    # unlike --output-format text which buffers everything until clean exit).
+    OUTPUT=$(jq -r 'select(.type == "assistant") | .message.content[]? | select(.type == "text") | .text' "$STDOUT_FILE" 2>/dev/null | tr -d '\0' || echo "")
     STDERR_CONTENT=$(cat "$STDERR_FILE" 2>/dev/null || echo "")
     log_verbose "Output captured: ${#OUTPUT} chars, stderr: ${#STDERR_CONTENT} chars"
 
@@ -2155,8 +2168,8 @@ DYNAMIC_HEADER
       fi
     fi
 
-    # Check for timeout (exit code 137 = killed by SIGKILL, 124 = timeout exit code)
-    if [ -n "$TIMEOUT_CMD" ] && { [ "$CLAUDE_EXIT_CODE" -eq 137 ] || [ "$CLAUDE_EXIT_CODE" -eq 124 ]; }; then
+    # Check for timeout (exit code 143 = SIGTERM, 137 = SIGKILL fallback, 124 = timeout exit code)
+    if [ -n "$TIMEOUT_CMD" ] && { [ "$CLAUDE_EXIT_CODE" -eq 143 ] || [ "$CLAUDE_EXIT_CODE" -eq 137 ] || [ "$CLAUDE_EXIT_CODE" -eq 124 ]; }; then
       echo ""
       echo "  ⚠ Claude process timed out after ${ITERATION_TIMEOUT}s (attempt $retry/$MAX_RETRIES)"
       log_verbose "TIMEOUT: Exit code $CLAUDE_EXIT_CODE after ${ITERATION_TIMEOUT}s"

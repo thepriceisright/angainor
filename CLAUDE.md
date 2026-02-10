@@ -66,7 +66,7 @@ cd flowchart && npm run lint                  # lint check
 | `--verbose`, `-v` | Show detailed info during API calls (response lengths, exit codes, stderr) |
 | `--debug` | Write full debug log to `angainor-debug.log` (implies verbose) |
 | `--debug=FILE` | Write debug log to custom path |
-| `--timeout=SECS` | Set iteration timeout (default: 3600s/60min objective, 600s PRD) |
+| `--timeout=SECS` | Set iteration timeout (default: 3600s/60min objective, 1800s/30min PRD) |
 | `--no-timeout` | Disable iteration timeout entirely |
 
 **When to use:**
@@ -155,9 +155,9 @@ Each objective iteration MUST end with `<iteration>COMPLETE</iteration>` (or a t
 - `<objective>SUCCESS|IMPOSSIBLE|PLATEAU</objective>` - Terminal states
 
 ### Live Output (Objective Mode Default)
-Both modes now use `--print` for reliability (the old `script`+FIFO mechanism was removed due to compatibility issues with Claude Code CLI v2.1.31+). The `--live` flag now controls whether output is shown on the terminal via `tail -f` while capturing.
+Both modes use `--print` with `--output-format stream-json --verbose` for reliability. The stream-json format writes JSONL events incrementally (surviving process termination), unlike `--output-format text` which buffers everything until clean exit. Output is extracted from JSONL using `jq` post-processing. The `--live` flag controls whether output is shown on the terminal via `tail -f | jq` while capturing.
 
-Objective mode still defaults to `--live` for visibility during long benchmarks. The generous timeout (60min default) handles long-running tasks.
+Objective mode still defaults to `--live` for visibility during long benchmarks. Timeouts use SIGTERM with a 15s SIGKILL fallback for graceful shutdown.
 
 **Flags:**
 - `--live` - Show Claude output on terminal in real-time (default for objective mode)
