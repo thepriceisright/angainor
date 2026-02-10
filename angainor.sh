@@ -1775,6 +1775,17 @@ if [ "$VERBOSE" = true ]; then
     log_error "Claude CLI not found"
   fi
 
+  # Check jq (required for JSON processing and stream-json output extraction)
+  if command -v jq &> /dev/null; then
+    JQ_VERSION=$(jq --version 2>/dev/null || echo "unknown")
+    echo "  ✓ jq found: $JQ_VERSION"
+  else
+    echo "  ✗ jq not found - required for JSON processing and output extraction"
+    echo "    Install with: apt install jq (Debian/Ubuntu), brew install jq (macOS), or yum install jq (RHEL)"
+    log_error "jq not found in PATH"
+    exit 1
+  fi
+
   # Check config file
   if [ -f "$CONFIG_FILE" ]; then
     CONFIG_SIZE=$(wc -c < "$CONFIG_FILE" | tr -d ' ')
